@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqua-scan-gate-controller
+  namespace: aqua-scan-gate-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aqua-scan-gate
+  template:
+    metadata:
+      labels:
+        app: aqua-scan-gate
+    spec:
+      serviceAccountName: aqua-scan-gate-controller
+      containers:
+        - name: manager
+          image: aqua-scan-gate:latest
+          args:
+            - --leader-elect
+            - --excluded-namespaces=kube-system,kube-public,cert-manager
+          env:
+            - name: AQUA_URL
+              valueFrom:
+                secretKeyRef:
+                  name: aqua-credentials
+                  key: url
+            - name: AQUA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aqua-credentials
+                  key: api-key
+          ports:
+            - containerPort: 9443
+              name: webhook
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: aqua-scan-gate-webhook-certs
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aqua-scan-gate-controller
+  namespace: aqua-scan-gate-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aqua-scan-gate-controller
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["security.security.example.com"]
+    resources: ["imagescans"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["security.security.example.com"]
+    resources: ["imagescans/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aqua-scan-gate-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: aqua-scan-gate-controller
+subjects:
+  - kind: ServiceAccount
+    name: aqua-scan-gate-controller
+    namespace: aqua-scan-gate-system
