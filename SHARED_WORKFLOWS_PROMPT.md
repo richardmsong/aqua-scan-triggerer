@@ -1,6 +1,6 @@
 # Task: Create a Shared GitHub Workflows Repository
 
-Create a repository called `shared-workflows` (or `.github`) with reusable GitHub Actions workflows for kubebuilder/Go projects that publish Docker images to GHCR.
+Create a repository called `richardmsong/shared-workflows` with reusable GitHub Actions workflows for kubebuilder/Go projects that publish Docker images to GHCR.
 
 ## Context
 
