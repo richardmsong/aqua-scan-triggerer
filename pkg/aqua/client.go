@@ -99,9 +99,7 @@ func (c *aquaClient) GetScanResult(ctx context.Context, image, digest string) (*
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
 	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log close error, but don't override the primary error
-		}
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode == http.StatusNotFound {
