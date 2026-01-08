@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      dry-run:
+        description: 'Dry run - show what would happen without making changes'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: richardmsong/shared-workflows/.github/workflows/tag-release.yml@main
+    with:
+      version: ${{ inputs.version || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+    secrets: inherit

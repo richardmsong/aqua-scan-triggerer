@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      push-image:
+        description: 'Push Docker image to registry'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci:
+    uses: richardmsong/shared-workflows/.github/workflows/ci.yml@main
+    with:
+      push-image: ${{ github.event_name != 'pull_request' || inputs.push-image == true }}
+    secrets: inherit
