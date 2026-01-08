@@ -69,13 +69,15 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Check for bypass annotation
-	if pod.Annotations[AnnotationBypassScan] == "true" {
+	if pod.Annotations != nil && pod.Annotations[AnnotationBypassScan] == "true" {
 		logger.Info("Bypass annotation found, removing gate", "pod", pod.Name)
 		removeSchedulingGate(&pod, SchedulingGateName)
 		if err := r.Update(ctx, &pod); err != nil {
 			return ctrl.Result{}, err
 		}
-		r.Recorder.Event(&pod, corev1.EventTypeWarning, "ScanBypassed", "Security scan bypassed via annotation")
+		if r.Recorder != nil {
+			r.Recorder.Event(&pod, corev1.EventTypeWarning, "ScanBypassed", "Security scan bypassed via annotation")
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -141,8 +143,10 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			continue
 		case securityv1alpha1.ScanPhaseFailed:
 			// Scan failed - don't remove gate, emit event
-			r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanFailed",
-				"Image %s failed security scan: %s", img.image, imageScan.Status.Message)
+			if r.Recorder != nil {
+				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanFailed",
+					"Image %s failed security scan: %s", img.image, imageScan.Status.Message)
+			}
 			allPassed = false
 		default:
 			// Still pending
@@ -157,11 +161,13 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.Update(ctx, &pod); err != nil {
 			return ctrl.Result{}, err
 		}
-		r.Recorder.Event(&pod, corev1.EventTypeNormal, "ScanPassed", "All images passed security scan")
+		if r.Recorder != nil {
+			r.Recorder.Event(&pod, corev1.EventTypeNormal, "ScanPassed", "All images passed security scan")
+		}
 		return ctrl.Result{}, nil
 	}
 
-	if len(pendingImages) > 0 {
+	if len(pendingImages) > 0 && r.Recorder != nil {
 		r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ScanPending",
 			"Waiting for scan to complete for: %s", strings.Join(pendingImages, ", "))
 	}
