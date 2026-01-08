@@ -44,13 +44,14 @@ docker-push: ## Push docker image.
 
 .PHONY: docker-buildx-ci
 docker-buildx-ci: ## Build multi-platform docker image for CI using buildx.
-	@echo "Building multi-platform image with tags: $(DOCKER_TAGS)"
+	@echo "Building image with tags: $(DOCKER_TAGS)"
 	docker buildx build \
-		--platform linux/amd64,linux/arm64 \
-		$(if $(DOCKER_PUSH),--push,--load) \
+		$(if $(DOCKER_PUSH),--platform linux/amd64$(COMMA)linux/arm64 --push,--platform linux/amd64 --load) \
 		$(foreach tag,$(DOCKER_TAGS),-t $(REGISTRY)/$(IMAGE_NAME):$(tag)) \
 		-f $(if $(DOCKERFILE),$(DOCKERFILE),Dockerfile) \
 		.
+
+COMMA := ,
 
 ##@ Deployment
 
