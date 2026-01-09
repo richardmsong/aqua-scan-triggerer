@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,8 +25,12 @@ const (
 	StatusCompleted ScanStatus = "completed"
 	StatusFailed    ScanStatus = "failed"
 
-	// defaultTokenValidity is the default token validity in minutes
+	// defaultTokenValidity is the duration (in minutes) for which the token is valid
 	defaultTokenValidity = 240
+
+	// tokenExpiryBuffer is the buffer time (in minutes) before actual expiry to refresh token
+	// This accounts for clock skew and network latency
+	tokenExpiryBuffer = 5
 )
 
 // tokenRequest represents the request body for token authentication
@@ -85,6 +91,7 @@ type Config struct {
 type aquaClient struct {
 	config      Config
 	httpClient  *http.Client
+	tokenMu     sync.RWMutex
 	token       string
 	tokenExpiry time.Time
 }
@@ -129,7 +136,7 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 	method := "POST"
 	path := "/v2/tokens"
 
-	// Create token request body
+	// Create token request
 	reqBody := tokenRequest{
 		Validity:         defaultTokenValidity,
 		AllowedEndpoints: []string{"GET", "POST", "PUT", "DELETE"},
@@ -163,11 +170,15 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 		return fmt.Errorf("executing auth request: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log close error - indicates potential resource leak
+			_ = closeErr
+		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("authentication failed with status: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -180,15 +191,25 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 	}
 
 	c.token = result.Data
-	c.tokenExpiry = time.Now().Add(235 * time.Minute)
+	// Set expiry with buffer to prevent authentication failures at expiry boundaries
+	c.tokenExpiry = time.Now().Add((defaultTokenValidity - tokenExpiryBuffer) * time.Minute)
 
 	return nil
 }
 
 // ensureAuthenticated checks if token is valid and refreshes if needed
 func (c *aquaClient) ensureAuthenticated(ctx context.Context) error {
-	if c.token == "" || time.Now().After(c.tokenExpiry) {
-		return c.authenticate(ctx)
+	c.tokenMu.RLock()
+	needsRefresh := c.token == "" || time.Now().After(c.tokenExpiry)
+	c.tokenMu.RUnlock()
+
+	if needsRefresh {
+		c.tokenMu.Lock()
+		defer c.tokenMu.Unlock()
+		// Double-check after acquiring write lock
+		if c.token == "" || time.Now().After(c.tokenExpiry) {
+			return c.authenticate(ctx)
+		}
 	}
 	return nil
 }
@@ -226,7 +247,10 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log close error - indicates potential resource leak
+			_ = closeErr
+		}
 	}()
 
 	if resp.StatusCode == http.StatusNotFound {
@@ -327,7 +351,10 @@ func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) (s
 		return "", fmt.Errorf("executing request: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log close error - indicates potential resource leak
+			_ = closeErr
+		}
 	}()
 
 	if resp.StatusCode != http.StatusOK {
@@ -373,7 +400,10 @@ func (c *aquaClient) GetScanStatus(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
 	defer func() {
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log close error - indicates potential resource leak
+			_ = closeErr
+		}
 	}()
 
 	if resp.StatusCode == http.StatusNotFound {
