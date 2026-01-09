@@ -382,10 +382,9 @@ var _ = Describe("Aqua Client", func() {
 					APISecret: "test-secret",
 				})
 
-				scanID, err := client.TriggerScan(context.Background(), "Docker Hub", "nginx:latest")
+				err := client.TriggerScan(context.Background(), "Docker Hub", "nginx:latest")
 
 				Expect(err).NotTo(HaveOccurred())
-				Expect(scanID).NotTo(BeEmpty())
 			})
 
 			It("should trigger scan with URL encoding", func() {
@@ -396,10 +395,9 @@ var _ = Describe("Aqua Client", func() {
 					APISecret: "test-secret",
 				})
 
-				scanID, err := client.TriggerScan(context.Background(), "Private Registry", "my-app:v1.0")
+				err := client.TriggerScan(context.Background(), "Private Registry", "my-app:v1.0")
 
 				Expect(err).NotTo(HaveOccurred())
-				Expect(scanID).NotTo(BeEmpty())
 			})
 		})
 
@@ -427,7 +425,7 @@ var _ = Describe("Aqua Client", func() {
 					APISecret: "test-secret",
 				})
 
-				_, err := client.TriggerScan(context.Background(), "Docker Hub", "nginx:latest")
+				err := client.TriggerScan(context.Background(), "Docker Hub", "nginx:latest")
 
 				Expect(err).To(HaveOccurred())
 			})

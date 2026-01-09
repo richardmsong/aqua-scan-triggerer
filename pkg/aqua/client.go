@@ -41,7 +41,6 @@ type tokenRequest struct {
 
 // ScanResult contains the results from Aqua
 type ScanResult struct {
-	ScanID     string
 	Status     ScanStatus
 	Image      string
 	Registry   string
@@ -60,7 +59,7 @@ type Client interface {
 	GetScanResult(ctx context.Context, registry, image string) (*ScanResult, error)
 
 	// TriggerScan initiates a new scan for an image
-	TriggerScan(ctx context.Context, registry, image string) (string, error)
+	TriggerScan(ctx context.Context, registry, image string) error
 
 	// GetScanStatus checks the status of a specific scan
 	GetScanStatus(ctx context.Context, registry, image string) (*ScanResult, error)
@@ -317,15 +316,15 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 }
 
 // TriggerScan initiates a new scan for an image
-func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) (string, error) {
+func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) error {
 	if err := c.ensureAuthenticated(ctx); err != nil {
-		return "", fmt.Errorf("authentication failed: %w", err)
+		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Parse image reference
 	_, repo, tag, err := parseImageReference(image)
 	if err != nil {
-		return "", fmt.Errorf("parsing image reference: %w", err)
+		return fmt.Errorf("parsing image reference: %w", err)
 	}
 
 	// URL encode parameters
@@ -338,7 +337,7 @@ func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) (s
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return fmt.Errorf("creating request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
@@ -346,18 +345,15 @@ func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) (s
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("executing request: %w", err)
+		return fmt.Errorf("executing request: %w", err)
 	}
 	defer closeResponseBody(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("scan trigger failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("scan trigger failed with status: %d", resp.StatusCode)
 	}
 
-	// Generate a scan ID for tracking (combination of registry, image, and timestamp)
-	scanID := fmt.Sprintf("%s/%s-%d", registry, image, time.Now().Unix())
-
-	return scanID, nil
+	return nil
 }
 
 // GetScanStatus checks the status of a specific scan

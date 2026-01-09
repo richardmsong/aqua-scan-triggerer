@@ -81,14 +81,13 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	case aqua.StatusNotFound:
 		// Trigger a new scan
 		logger.Info("No existing scan found, triggering new scan", "image", imageScan.Spec.Image)
-		scanID, err := r.AquaClient.TriggerScan(ctx, registry, imageScan.Spec.Image)
+		err := r.AquaClient.TriggerScan(ctx, registry, imageScan.Spec.Image)
 		if err != nil {
 			logger.Error(err, "Failed to trigger scan")
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
 			imageScan.Status.Message = err.Error()
 		} else {
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseInProgress
-			imageScan.Status.AquaScanID = scanID
 			imageScan.Status.Message = "Scan triggered"
 		}
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
@@ -148,6 +147,28 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// extractRegistry parses the registry from an image reference
+// Returns "Docker Hub" for images without explicit registry
+func extractRegistry(image string) string {
+	// Remove digest if present
+	if idx := strings.Index(image, "@"); idx != -1 {
+		image = image[:idx]
+	}
+
+	// Check for registry in the image reference
+	slashIdx := strings.Index(image, "/")
+	if slashIdx > 0 {
+		registryPart := image[:slashIdx]
+		// Check if it looks like a registry (has . or :)
+		if strings.Contains(registryPart, ".") || strings.Contains(registryPart, ":") {
+			return registryPart
+		}
+	}
+
+	// Default to Docker Hub
+	return "Docker Hub"
 }
 
 func (r *ImageScanReconciler) SetupWithManager(mgr ctrl.Manager) error {
