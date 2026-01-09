@@ -161,7 +161,7 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 	}
 
 	c.token = result.Data
-	c.tokenExpiry = time.Now().Add(240 * time.Minute)
+	c.tokenExpiry = time.Now().Add(235 * time.Minute)
 
 	return nil
 }
