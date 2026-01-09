@@ -22,7 +22,16 @@ const (
 	StatusScanning  ScanStatus = "scanning"
 	StatusCompleted ScanStatus = "completed"
 	StatusFailed    ScanStatus = "failed"
+
+	// defaultTokenValidity is the default token validity in minutes
+	defaultTokenValidity = 240
 )
+
+// tokenRequest represents the request body for token authentication
+type tokenRequest struct {
+	Validity         int      `json:"validity"`
+	AllowedEndpoints []string `json:"allowed_endpoints"`
+}
 
 // ScanResult contains the results from Aqua
 type ScanResult struct {
@@ -119,7 +128,17 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 	method := "POST"
 	path := "/v2/tokens"
-	body := `{"validity":240,"allowed_endpoints":["GET","POST","PUT","DELETE"]}`
+
+	// Create token request body
+	reqBody := tokenRequest{
+		Validity:         defaultTokenValidity,
+		AllowedEndpoints: []string{"GET", "POST", "PUT", "DELETE"},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshaling token request: %w", err)
+	}
+	body := string(bodyBytes)
 
 	// Create HMAC signature
 	stringToSign := timestamp + method + path + body
