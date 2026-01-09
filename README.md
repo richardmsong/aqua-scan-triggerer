@@ -105,7 +105,7 @@ The `ImageScan` CRD tracks the security scan status for container images.
 
 Example:
 ```yaml
-apiVersion: security.security.example.com/v1alpha1
+apiVersion: security.example.com/v1alpha1
 kind: ImageScan
 metadata:
   name: img-abc123

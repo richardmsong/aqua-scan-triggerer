@@ -48,7 +48,7 @@ type PodGateReconciler struct {
 
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups=security.security.example.com,resources=imagescans,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=security.example.com,resources=imagescans,verbs=get;list;watch;create
 
 func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)

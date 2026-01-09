@@ -12,6 +12,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
@@ -74,7 +75,10 @@ func main() {
 	})
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: metricsAddr,
+		},
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "aqua-scan-gate.security.example.com",
 		HealthProbeBindAddress: probeAddr,

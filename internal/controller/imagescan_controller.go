@@ -22,9 +22,9 @@ type ImageScanReconciler struct {
 	RescanInterval time.Duration
 }
 
-// +kubebuilder:rbac:groups=security.security.example.com,resources=imagescans,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=security.security.example.com,resources=imagescans/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=security.security.example.com,resources=imagescans/finalizers,verbs=update
+// +kubebuilder:rbac:groups=security.example.com,resources=imagescans,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=security.example.com,resources=imagescans/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=security.example.com,resources=imagescans/finalizers,verbs=update
 
 func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -45,6 +45,10 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				logger.Info("Triggering rescan due to interval", "image", imageScan.Spec.Image)
 				imageScan.Status.Phase = securityv1alpha1.ScanPhasePending
 				imageScan.Status.Message = "Rescan triggered"
+				if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
+					logger.Error(updateErr, "Failed to update ImageScan status for rescan")
+					return ctrl.Result{}, updateErr
+				}
 			} else {
 				// Requeue for when rescan is due
 				return ctrl.Result{RequeueAfter: r.RescanInterval - elapsed}, nil
