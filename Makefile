@@ -19,7 +19,8 @@ CONTAINER_TOOL ?= docker
 
 # Docker registry configuration
 REGISTRY ?= ghcr.io
-IMAGE_NAME ?= richardmsong/aqua-scan-gate
+IMAGE_NAME ?= richardmsong/aqua-scan-triggerer
+IMG ?= $(REGISTRY)/$(IMAGE_NAME):latest
 
 # DOCKER_TAGS can be set to override default tags (space-separated for multiple tags)
 # Example: make docker-buildx-ci DOCKER_TAGS="latest v1.0.0 sha-abc1234"
