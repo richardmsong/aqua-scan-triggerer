@@ -245,6 +245,9 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		ImageName  string `json:"image_name"`
 		Registry   string `json:"registry"`
 		Disallowed bool   `json:"disallowed"`
+		ScanDate   string `json:"scan_date"`    // ISO 8601 timestamp
+		ScannedAt  string `json:"scanned_at"`   // Alternative field name
+		LastScan   string `json:"last_scan"`    // Another alternative
 		CVEsCounts struct {
 			Total        int     `json:"total"`
 			Critical     int     `json:"critical"`
@@ -259,6 +262,22 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
+	// Parse scan timestamp from API response (try multiple field names)
+	scanTime := time.Now() // fallback to current time if no timestamp in response
+	if apiResult.ScanDate != "" {
+		if t, err := time.Parse(time.RFC3339, apiResult.ScanDate); err == nil {
+			scanTime = t
+		}
+	} else if apiResult.ScannedAt != "" {
+		if t, err := time.Parse(time.RFC3339, apiResult.ScannedAt); err == nil {
+			scanTime = t
+		}
+	} else if apiResult.LastScan != "" {
+		if t, err := time.Parse(time.RFC3339, apiResult.LastScan); err == nil {
+			scanTime = t
+		}
+	}
+
 	result := &ScanResult{
 		Status:     StatusCompleted,
 		Image:      image,
@@ -269,7 +288,7 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		Low:        apiResult.CVEsCounts.Low,
 		Total:      apiResult.CVEsCounts.Total,
 		Disallowed: apiResult.Disallowed,
-		ScanTime:   time.Now(),
+		ScanTime:   scanTime,
 	}
 
 	return result, nil

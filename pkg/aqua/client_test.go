@@ -27,6 +27,7 @@ func mockScanResultResponse() string {
 		"image_name": "nginx:latest",
 		"registry": "Docker Hub",
 		"disallowed": false,
+		"scan_date": "2024-01-15T10:30:00Z",
 		"cves_counts": {
 			"total": 10,
 			"critical": 0,
@@ -57,6 +58,7 @@ func mockScanResultWithCriticalVulns() string {
 		"image_name": "vulnerable:latest",
 		"registry": "Docker Hub",
 		"disallowed": false,
+		"scan_date": "2024-01-16T14:20:00Z",
 		"cves_counts": {
 			"total": 15,
 			"critical": 3,
