@@ -26,19 +26,18 @@ const (
 
 // ScanResult contains the results from Aqua
 type ScanResult struct {
-	ScanID           string
-	Status           ScanStatus
-	Image            string
-	Registry         string
-	Digest           string
-	Critical         int
-	High             int
-	Medium           int
-	Low              int
-	Total            int
-	CompliancePassed bool
-	Disallowed       bool
-	ScanTime         time.Time
+	ScanID     string
+	Status     ScanStatus
+	Image      string
+	Registry   string
+	Digest     string
+	Critical   int
+	High       int
+	Medium     int
+	Low        int
+	Total      int
+	Disallowed bool
+	ScanTime   time.Time
 }
 
 // Client interface for Aqua operations
@@ -242,17 +241,16 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 	}
 
 	result := &ScanResult{
-		Status:           StatusCompleted,
-		Image:            image,
-		Registry:         registry,
-		Critical:         apiResult.CVEsCounts.Critical,
-		High:             apiResult.CVEsCounts.High,
-		Medium:           apiResult.CVEsCounts.Medium,
-		Low:              apiResult.CVEsCounts.Low,
-		Total:            apiResult.CVEsCounts.Total,
-		Disallowed:       apiResult.Disallowed,
-		CompliancePassed: !apiResult.Disallowed && apiResult.CVEsCounts.Critical == 0,
-		ScanTime:         time.Now(),
+		Status:     StatusCompleted,
+		Image:      image,
+		Registry:   registry,
+		Critical:   apiResult.CVEsCounts.Critical,
+		High:       apiResult.CVEsCounts.High,
+		Medium:     apiResult.CVEsCounts.Medium,
+		Low:        apiResult.CVEsCounts.Low,
+		Total:      apiResult.CVEsCounts.Total,
+		Disallowed: apiResult.Disallowed,
+		ScanTime:   time.Now(),
 	}
 
 	return result, nil
