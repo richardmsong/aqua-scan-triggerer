@@ -2,8 +2,6 @@ package aqua
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,15 +84,6 @@ func mockScanStatusScanned() string {
 // mockScanStatusFailed returns a failed scan status
 func mockScanStatusFailed() string {
 	return `{"status": "Fail"}`
-}
-
-// mockErrorResponse returns a generic error response
-func mockErrorResponse(statusCode int, message string) (int, string) {
-	return statusCode, fmt.Sprintf(`{
-		"status": %d,
-		"code": 1001,
-		"message": "%s"
-	}`, statusCode, message)
 }
 
 // TestNewClient verifies client initialization
@@ -194,7 +183,7 @@ func TestAuthenticate(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.mockStatusCode)
-				w.Write([]byte(tt.mockResponse))
+				_, _ = w.Write([]byte(tt.mockResponse))
 			}))
 			defer server.Close()
 
@@ -279,7 +268,7 @@ func TestGetScanResult(t *testing.T) {
 				// First call is for authentication
 				if callCount == 1 {
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(mockTokenResponse()))
+					_, _ = w.Write([]byte(mockTokenResponse()))
 					return
 				}
 
@@ -290,7 +279,7 @@ func TestGetScanResult(t *testing.T) {
 
 				w.WriteHeader(tt.mockStatusCode)
 				if tt.mockResponse != "" {
-					w.Write([]byte(tt.mockResponse))
+					_, _ = w.Write([]byte(tt.mockResponse))
 				}
 			}))
 			defer server.Close()
@@ -360,7 +349,7 @@ func TestTriggerScan(t *testing.T) {
 				// First call is for authentication
 				if callCount == 1 {
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(mockTokenResponse()))
+					_, _ = w.Write([]byte(mockTokenResponse()))
 					return
 				}
 
@@ -467,13 +456,13 @@ func TestGetScanStatus(t *testing.T) {
 				// First call is for authentication
 				if callCount == 1 {
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(mockTokenResponse()))
+					_, _ = w.Write([]byte(mockTokenResponse()))
 					return
 				}
 
 				w.WriteHeader(tt.mockStatusCode)
 				if tt.mockResponse != "" {
-					w.Write([]byte(tt.mockResponse))
+					_, _ = w.Write([]byte(tt.mockResponse))
 				}
 			}))
 			defer server.Close()
@@ -511,13 +500,13 @@ func TestTokenExpiration(t *testing.T) {
 		// Authentication calls
 		if r.URL.Path == "/v2/tokens" {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(mockTokenResponse()))
+			_, _ = w.Write([]byte(mockTokenResponse()))
 			return
 		}
 
 		// API calls
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(mockScanStatusScanned()))
+		_, _ = w.Write([]byte(mockScanStatusScanned()))
 	}))
 	defer server.Close()
 
@@ -564,7 +553,7 @@ func TestContextCancellation(t *testing.T) {
 		// Simulate slow response
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(mockTokenResponse()))
+		_, _ = w.Write([]byte(mockTokenResponse()))
 	}))
 	defer server.Close()
 
@@ -594,12 +583,12 @@ func TestInvalidJSON(t *testing.T) {
 		// First call is for authentication
 		if callCount == 1 {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(mockTokenResponse()))
+			_, _ = w.Write([]byte(mockTokenResponse()))
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("invalid json"))
+		_, _ = w.Write([]byte("invalid json"))
 	}))
 	defer server.Close()
 
@@ -681,49 +670,5 @@ func TestParseImageReference(t *testing.T) {
 				t.Errorf("Expected tag %s, got %s", tt.expectedTag, tag)
 			}
 		})
-	}
-}
-
-// Example response types for reference
-type tokenResponse struct {
-	Status int    `json:"status"`
-	Code   int    `json:"code"`
-	Data   string `json:"data"`
-}
-
-type scanStatusResponse struct {
-	Status string `json:"status"`
-}
-
-type scanResultResponse struct {
-	ImageName  string `json:"image_name"`
-	Registry   string `json:"registry"`
-	Disallowed bool   `json:"disallowed"`
-	CVEsCounts struct {
-		Total        int     `json:"total"`
-		Critical     int     `json:"critical"`
-		High         int     `json:"high"`
-		Medium       int     `json:"medium"`
-		Low          int     `json:"low"`
-		ScoreAverage float64 `json:"score_average"`
-	} `json:"cves_counts"`
-	CVEs []struct {
-		ImageID     string  `json:"imageid"`
-		File        string  `json:"file"`
-		Name        string  `json:"name"`
-		Type        string  `json:"type"`
-		Description string  `json:"description"`
-		Score       float64 `json:"score"`
-		Severity    string  `json:"severity"`
-		PublishDate string  `json:"publishdate"`
-		Acknowledged bool   `json:"acknowledged"`
-	} `json:"cves"`
-}
-
-// unmarshalTestResponse is a helper for tests
-func unmarshalTestResponse(t *testing.T, data []byte, v interface{}) {
-	t.Helper()
-	if err := json.Unmarshal(data, v); err != nil {
-		t.Fatalf("Failed to unmarshal test data: %v", err)
 	}
 }

@@ -144,7 +144,9 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("executing auth request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("authentication failed with status: %d", resp.StatusCode)
@@ -205,7 +207,9 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return &ScanResult{
@@ -286,7 +290,9 @@ func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) (s
 	if err != nil {
 		return "", fmt.Errorf("executing request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("scan trigger failed with status: %d", resp.StatusCode)
@@ -330,7 +336,9 @@ func (c *aquaClient) GetScanStatus(ctx context.Context, registry, image string) 
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return &ScanResult{
