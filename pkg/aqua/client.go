@@ -183,12 +183,18 @@ func (c *aquaClient) authenticate(ctx context.Context) error {
 		return fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Read entire response body
+	bodyBytes, err2 := io.ReadAll(resp.Body)
+	if err2 != nil {
+		return fmt.Errorf("reading auth response: %w", err2)
+	}
+
 	var result struct {
 		Status int    `json:"status"`
 		Code   int    `json:"code"`
 		Data   string `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return fmt.Errorf("decoding auth response: %w", err)
 	}
 
@@ -262,6 +268,12 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
+	// Read entire response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading scan result response: %w", err)
+	}
+
 	var apiResult struct {
 		ImageName  string `json:"image_name"`
 		Registry   string `json:"registry"`
@@ -279,7 +291,7 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		} `json:"cves_counts"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&apiResult); err != nil {
+	if err := json.Unmarshal(bodyBytes, &apiResult); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
@@ -402,11 +414,17 @@ func (c *aquaClient) GetScanStatus(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
+	// Read entire response body
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading scan status response: %w", err)
+	}
+
 	var apiResult struct {
 		Status string `json:"status"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&apiResult); err != nil {
+	if err := json.Unmarshal(bodyBytes, &apiResult); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
