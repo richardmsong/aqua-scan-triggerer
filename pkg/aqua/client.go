@@ -63,6 +63,9 @@ type Client interface {
 
 	// GetScanStatus checks the status of a specific scan
 	GetScanStatus(ctx context.Context, registry, image string) (*ScanResult, error)
+
+	// ConvertImageRef parses an image reference and returns the Aqua registry name and image name
+	ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, err error)
 }
 
 // Config holds Aqua client configuration
@@ -87,11 +90,14 @@ type Config struct {
 }
 
 type aquaClient struct {
-	config      Config
-	httpClient  *http.Client
-	tokenMu     sync.RWMutex
-	token       string
-	tokenExpiry time.Time
+	config               Config
+	httpClient           *http.Client
+	tokenMu              sync.RWMutex
+	token                string
+	tokenExpiry          time.Time
+	registryCacheMu      sync.RWMutex
+	registryCache        map[string]string // hostname -> Aqua registry name
+	registryCacheRefresh time.Time
 }
 
 // NewClient creates a new Aqua client
@@ -105,6 +111,7 @@ func NewClient(config Config) Client {
 		httpClient: &http.Client{
 			Timeout: config.Timeout,
 		},
+		registryCache: make(map[string]string),
 	}
 }
 
@@ -494,14 +501,160 @@ func parseImageReference(imageRef string) (registry, repository, tag string, err
 			repository = imageRef[slashIdx+1:]
 		} else {
 			// It's a Docker Hub image with namespace (e.g., library/nginx)
-			registry = "Docker Hub"
+			registry = "docker.io"
 			repository = imageRef
 		}
 	} else {
 		// No slash, it's a Docker Hub image
-		registry = "Docker Hub"
+		registry = "docker.io"
 		repository = imageRef
 	}
 
 	return registry, repository, tag, nil
+}
+
+// registryListResponse represents the response from /registries API
+type registryListResponse struct {
+	Count    int `json:"count"`
+	Page     int `json:"page"`
+	PageSize int `json:"pagesize"`
+	Result   []struct {
+		Name     string   `json:"name"`
+		Prefixes []string `json:"prefixes"`
+	} `json:"result"`
+}
+
+// RefreshRegistryCache fetches all registries from Aqua API and populates the cache
+func (c *aquaClient) RefreshRegistryCache(ctx context.Context) error {
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	newCache := make(map[string]string)
+	page := 1
+	pageSize := 100
+
+	for {
+		// Build URL with pagination
+		apiURL := fmt.Sprintf("%s/api/v2/registries?page=%d&pagesize=%d",
+			c.getBaseURL(), page, pageSize)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+		if err != nil {
+			return fmt.Errorf("creating registries request: %w", err)
+		}
+
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("executing registries request: %w", err)
+		}
+		defer closeResponseBody(resp.Body)
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("registries API failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		// Read entire response body
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("reading registries response: %w", err)
+		}
+
+		var response registryListResponse
+		if err := json.Unmarshal(bodyBytes, &response); err != nil {
+			return fmt.Errorf("decoding registries response: %w", err)
+		}
+
+		// Populate cache with hostname -> registry name mappings
+		for _, reg := range response.Result {
+			for _, prefix := range reg.Prefixes {
+				// Normalize the prefix (remove protocol if present)
+				prefix = strings.TrimPrefix(prefix, "https://")
+				prefix = strings.TrimPrefix(prefix, "http://")
+				newCache[prefix] = reg.Name
+			}
+		}
+
+		// Check if we have more pages
+		if len(response.Result) < pageSize {
+			break
+		}
+		page++
+	}
+
+	// Update cache atomically
+	c.registryCacheMu.Lock()
+	c.registryCache = newCache
+	c.registryCacheRefresh = time.Now()
+	c.registryCacheMu.Unlock()
+
+	return nil
+}
+
+// GetRegistryName returns the Aqua registry name for a given registry hostname
+// It automatically refreshes the cache if needed (older than 1 hour or not found)
+func (c *aquaClient) GetRegistryName(ctx context.Context, hostname string) (string, error) {
+	// Normalize hostname
+	hostname = strings.TrimPrefix(hostname, "https://")
+	hostname = strings.TrimPrefix(hostname, "http://")
+
+	// Check if cache needs refresh (older than 1 hour)
+	c.registryCacheMu.RLock()
+	cacheAge := time.Since(c.registryCacheRefresh)
+	registryName, found := c.registryCache[hostname]
+	c.registryCacheMu.RUnlock()
+
+	// Refresh cache if it's older than 1 hour
+	if cacheAge > time.Hour {
+		if err := c.RefreshRegistryCache(ctx); err != nil {
+			return "", fmt.Errorf("refreshing registry cache: %w", err)
+		}
+
+		// Try lookup again after refresh
+		c.registryCacheMu.RLock()
+		registryName, found = c.registryCache[hostname]
+		c.registryCacheMu.RUnlock()
+	}
+
+	// If not found, refresh cache and try again
+	if !found {
+		if err := c.RefreshRegistryCache(ctx); err != nil {
+			return "", fmt.Errorf("refreshing registry cache: %w", err)
+		}
+
+		c.registryCacheMu.RLock()
+		registryName, found = c.registryCache[hostname]
+		c.registryCacheMu.RUnlock()
+
+		if !found {
+			return "", fmt.Errorf("registry not found in Aqua: %s", hostname)
+		}
+	}
+
+	return registryName, nil
+}
+
+// ConvertImageRef parses an image reference and returns the Aqua registry name and image name
+// Example: "docker.io/library/python:3.12.12" -> ("Docker Hub", "library/python:3.12.12")
+func (c *aquaClient) ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, err error) {
+	// Parse the image reference
+	hostname, repository, tag, err := parseImageReference(imageRef)
+	if err != nil {
+		return "", "", fmt.Errorf("parsing image reference: %w", err)
+	}
+
+	// Get the Aqua registry name for this hostname
+	registryName, err = c.GetRegistryName(ctx, hostname)
+	if err != nil {
+		return "", "", fmt.Errorf("looking up registry name: %w", err)
+	}
+
+	// Construct the image name (repository:tag)
+	imageName = repository + ":" + tag
+
+	return registryName, imageName, nil
 }
