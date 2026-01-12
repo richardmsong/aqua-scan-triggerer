@@ -10,10 +10,10 @@ type ImageScanSpec struct {
 	// +kubebuilder:validation:Required
 	Image string `json:"image"`
 
-	// Digest is the image digest (sha256:...)
-	// +kubebuilder:validation:Required
+	// Digest is the image digest (sha256:...) - optional, no longer used by controller
+	// +optional
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// Registry is the source registry for the image
 	// +optional

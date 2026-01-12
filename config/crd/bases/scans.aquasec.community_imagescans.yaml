@@ -56,7 +56,8 @@ spec:
             description: ImageScanSpec defines the desired state of ImageScan
             properties:
               digest:
-                description: Digest is the image digest (sha256:...)
+                description: Digest is the image digest (sha256:...) - optional, no
+                  longer used by controller
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               image:
@@ -66,7 +67,6 @@ spec:
                 description: Registry is the source registry for the image
                 type: string
             required:
-            - digest
             - image
             type: object
           status:

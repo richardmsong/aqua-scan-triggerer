@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,8 +59,14 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Extract registry from spec or image reference
+	registry := imageScan.Spec.Registry
+	if registry == "" {
+		registry = extractRegistry(imageScan.Spec.Image)
+	}
+
 	// Check current scan status in Aqua
-	result, err := r.AquaClient.GetScanResult(ctx, imageScan.Spec.Image, imageScan.Spec.Digest)
+	result, err := r.AquaClient.GetScanResult(ctx, registry, imageScan.Spec.Image)
 	if err != nil {
 		logger.Error(err, "Failed to get scan result from Aqua")
 		imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
@@ -74,14 +81,13 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	case aqua.StatusNotFound:
 		// Trigger a new scan
 		logger.Info("No existing scan found, triggering new scan", "image", imageScan.Spec.Image)
-		scanID, err := r.AquaClient.TriggerScan(ctx, imageScan.Spec.Image, imageScan.Spec.Digest)
+		err := r.AquaClient.TriggerScan(ctx, registry, imageScan.Spec.Image)
 		if err != nil {
 			logger.Error(err, "Failed to trigger scan")
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
 			imageScan.Status.Message = err.Error()
 		} else {
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseInProgress
-			imageScan.Status.AquaScanID = scanID
 			imageScan.Status.Message = "Scan triggered"
 		}
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
@@ -141,6 +147,38 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// extractRegistry parses the registry from an image reference
+// Returns "Docker Hub" for images without explicit registry
+func extractRegistry(image string) string {
+	// Remove digest if present
+	if idx := strings.Index(image, "@"); idx != -1 {
+		image = image[:idx]
+	}
+
+	// Remove tag if present
+	if idx := strings.LastIndex(image, ":"); idx != -1 {
+		// Only remove if it's a tag, not a port
+		afterColon := image[idx+1:]
+		// Check if what's after colon looks like a tag (no slashes, no dots suggesting port)
+		if !strings.Contains(afterColon, "/") {
+			image = image[:idx]
+		}
+	}
+
+	// Check for registry in the image reference
+	slashIdx := strings.Index(image, "/")
+	if slashIdx > 0 {
+		registryPart := image[:slashIdx]
+		// Check if it looks like a registry (has . or :)
+		if strings.Contains(registryPart, ".") || strings.Contains(registryPart, ":") {
+			return registryPart
+		}
+	}
+
+	// Default to Docker Hub
+	return "Docker Hub"
 }
 
 func (r *ImageScanReconciler) SetupWithManager(mgr ctrl.Manager) error {
