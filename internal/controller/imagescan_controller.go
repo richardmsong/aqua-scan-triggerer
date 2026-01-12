@@ -65,7 +65,8 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if registry == "" {
 		// Use ConvertImageRef to get the Aqua registry name from the cache
 		var err error
-		registry, image, err = r.AquaClient.ConvertImageRef(ctx, imageScan.Spec.Image)
+		var imageName, tag string
+		registry, imageName, tag, err = r.AquaClient.ConvertImageRef(ctx, imageScan.Spec.Image)
 		if err != nil {
 			logger.Error(err, "Failed to convert image reference")
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
@@ -75,6 +76,8 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		// Reconstruct the full image name with tag for API calls
+		image = imageName + ":" + tag
 	}
 
 	// Check current scan status in Aqua

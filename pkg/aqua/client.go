@@ -64,8 +64,8 @@ type Client interface {
 	// GetScanStatus checks the status of a specific scan
 	GetScanStatus(ctx context.Context, registry, image string) (*ScanResult, error)
 
-	// ConvertImageRef parses an image reference and returns the Aqua registry name and image name
-	ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, err error)
+	// ConvertImageRef parses an image reference and returns the Aqua registry name, image name, and tag separately
+	ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, tag string, err error)
 }
 
 // Config holds Aqua client configuration
@@ -240,10 +240,10 @@ func (c *aquaClient) GetScanResult(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Parse image reference
-	_, repo, tag, err := parseImageReference(image)
+	// Parse image reference to extract repository and tag
+	_, repo, tag, err := c.ConvertImageRef(ctx, image)
 	if err != nil {
-		return nil, fmt.Errorf("parsing image reference: %w", err)
+		return nil, fmt.Errorf("converting image reference: %w", err)
 	}
 
 	// URL encode parameters
@@ -345,10 +345,10 @@ func (c *aquaClient) TriggerScan(ctx context.Context, registry, image string) er
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Parse image reference
-	_, repo, tag, err := parseImageReference(image)
+	// Parse image reference to extract repository and tag
+	_, repo, tag, err := c.ConvertImageRef(ctx, image)
 	if err != nil {
-		return fmt.Errorf("parsing image reference: %w", err)
+		return fmt.Errorf("converting image reference: %w", err)
 	}
 
 	// URL encode parameters
@@ -386,10 +386,10 @@ func (c *aquaClient) GetScanStatus(ctx context.Context, registry, image string) 
 		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Parse image reference
-	_, repo, tag, err := parseImageReference(image)
+	// Parse image reference to extract repository and tag
+	_, repo, tag, err := c.ConvertImageRef(ctx, image)
 	if err != nil {
-		return nil, fmt.Errorf("parsing image reference: %w", err)
+		return nil, fmt.Errorf("converting image reference: %w", err)
 	}
 
 	// URL encode parameters
@@ -462,60 +462,6 @@ func (c *aquaClient) GetScanStatus(ctx context.Context, registry, image string) 
 	}
 
 	return result, nil
-}
-
-// parseImageReference parses an image reference into registry, repository, and tag components
-func parseImageReference(imageRef string) (registry, repository, tag string, err error) {
-	// Remove digest if present
-	if strings.Contains(imageRef, "@") {
-		parts := strings.Split(imageRef, "@")
-		imageRef = parts[0]
-	}
-
-	// Handle tag
-	tagIdx := strings.LastIndex(imageRef, ":")
-	hasPort := false
-
-	// Check if the colon is part of a port number (e.g., registry.io:5000)
-	if tagIdx > 0 {
-		beforeColon := imageRef[:tagIdx]
-		if strings.Contains(beforeColon, "/") {
-			// Colon is after a slash, so it's a tag
-			tag = imageRef[tagIdx+1:]
-			imageRef = imageRef[:tagIdx]
-		} else if strings.Contains(beforeColon, ".") {
-			// Colon is in the domain, so it's a port
-			hasPort = true
-			tag = "latest"
-		} else {
-			// Single name with colon, it's a tag
-			tag = imageRef[tagIdx+1:]
-			imageRef = imageRef[:tagIdx]
-		}
-	} else {
-		tag = "latest"
-	}
-
-	// Handle registry and repository
-	slashIdx := strings.Index(imageRef, "/")
-	if slashIdx > 0 {
-		registryPart := imageRef[:slashIdx]
-		// Check if it looks like a registry (has . or :)
-		if strings.Contains(registryPart, ".") || (hasPort && strings.Contains(registryPart, ":")) {
-			registry = registryPart
-			repository = imageRef[slashIdx+1:]
-		} else {
-			// It's a Docker Hub image with namespace (e.g., library/nginx)
-			registry = "docker.io"
-			repository = imageRef
-		}
-	} else {
-		// No slash, it's a Docker Hub image
-		registry = "docker.io"
-		repository = imageRef
-	}
-
-	return registry, repository, tag, nil
 }
 
 // registryListResponse represents the response from /registries API
@@ -643,23 +589,65 @@ func (c *aquaClient) GetRegistryName(ctx context.Context, hostname string) (stri
 	return registryName, nil
 }
 
-// ConvertImageRef parses an image reference and returns the Aqua registry name and image name
-// Example: "docker.io/library/python:3.12.12" -> ("Docker Hub", "library/python:3.12.12")
-func (c *aquaClient) ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, err error) {
-	// Parse the image reference
-	hostname, repository, tag, err := parseImageReference(imageRef)
-	if err != nil {
-		return "", "", fmt.Errorf("parsing image reference: %w", err)
+// ConvertImageRef parses an image reference and returns the Aqua registry name, image name, and tag separately
+// Example: "docker.io/library/python:3.12.12" -> ("Docker Hub", "library/python", "3.12.12", nil)
+func (c *aquaClient) ConvertImageRef(ctx context.Context, imageRef string) (registryName string, imageName string, tag string, err error) {
+	// Remove digest if present
+	originalRef := imageRef
+	if strings.Contains(imageRef, "@") {
+		parts := strings.Split(imageRef, "@")
+		imageRef = parts[0]
+	}
+
+	// Handle tag
+	tagIdx := strings.LastIndex(imageRef, ":")
+	hasPort := false
+
+	// Check if the colon is part of a port number (e.g., registry.io:5000)
+	if tagIdx > 0 {
+		beforeColon := imageRef[:tagIdx]
+		if strings.Contains(beforeColon, "/") {
+			// Colon is after a slash, so it's a tag
+			tag = imageRef[tagIdx+1:]
+			imageRef = imageRef[:tagIdx]
+		} else if strings.Contains(beforeColon, ".") {
+			// Colon is in the domain, so it's a port
+			hasPort = true
+			tag = "latest"
+		} else {
+			// Single name with colon, it's a tag
+			tag = imageRef[tagIdx+1:]
+			imageRef = imageRef[:tagIdx]
+		}
+	} else {
+		tag = "latest"
+	}
+
+	// Handle registry and repository
+	var hostname, repository string
+	slashIdx := strings.Index(imageRef, "/")
+	if slashIdx > 0 {
+		registryPart := imageRef[:slashIdx]
+		// Check if it looks like a registry (has . or :)
+		if strings.Contains(registryPart, ".") || (hasPort && strings.Contains(registryPart, ":")) {
+			hostname = registryPart
+			repository = imageRef[slashIdx+1:]
+		} else {
+			// It's a Docker Hub image with namespace (e.g., library/nginx)
+			hostname = "docker.io"
+			repository = imageRef
+		}
+	} else {
+		// No slash, it's a Docker Hub image
+		hostname = "docker.io"
+		repository = imageRef
 	}
 
 	// Get the Aqua registry name for this hostname
 	registryName, err = c.GetRegistryName(ctx, hostname)
 	if err != nil {
-		return "", "", fmt.Errorf("looking up registry name: %w", err)
+		return "", "", "", fmt.Errorf("looking up registry name for %s: %w", originalRef, err)
 	}
 
-	// Construct the image name (repository:tag)
-	imageName = repository + ":" + tag
-
-	return registryName, imageName, nil
+	return registryName, repository, tag, nil
 }
