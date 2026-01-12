@@ -59,6 +59,7 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Check current scan status in Aqua
+	// With v2 API: not 404 = image is scanned and ready
 	result, err := r.AquaClient.GetScanResult(ctx, imageScan.Spec.Image, imageScan.Spec.Digest)
 	if err != nil {
 		logger.Error(err, "Failed to get scan result from Aqua")
@@ -72,8 +73,8 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	switch result.Status {
 	case aqua.StatusNotFound:
-		// Trigger a new scan
-		logger.Info("No existing scan found, triggering new scan", "image", imageScan.Spec.Image)
+		// Image not found in Aqua - trigger a new scan
+		logger.Info("Image not found in Aqua, triggering scan", "image", imageScan.Spec.Image, "digest", imageScan.Spec.Digest)
 		scanID, err := r.AquaClient.TriggerScan(ctx, imageScan.Spec.Image, imageScan.Spec.Digest)
 		if err != nil {
 			logger.Error(err, "Failed to trigger scan")
@@ -82,58 +83,27 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		} else {
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseInProgress
 			imageScan.Status.AquaScanID = scanID
-			imageScan.Status.Message = "Scan triggered"
+			imageScan.Status.Message = "Scan triggered, waiting for Aqua to process"
 		}
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
+		// Requeue to check if the scan has been processed
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 
-	case aqua.StatusQueued, aqua.StatusScanning:
-		imageScan.Status.Phase = securityv1alpha1.ScanPhaseInProgress
-		imageScan.Status.Message = string(result.Status)
-		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-
-	case aqua.StatusCompleted:
+	case aqua.StatusFound:
+		// Image found in Aqua (not 404) - consider it passed
+		// Aqua Enforcer will handle actual enforcement
 		now := metav1.Now()
 		imageScan.Status.LastScanTime = &now
 		imageScan.Status.CompletedTime = &now
-		imageScan.Status.Vulnerabilities = &securityv1alpha1.VulnerabilitySummary{
-			Critical: result.Critical,
-			High:     result.High,
-			Medium:   result.Medium,
-			Low:      result.Low,
-		}
+		imageScan.Status.Phase = securityv1alpha1.ScanPhasePassed
+		imageScan.Status.Message = "Image found in Aqua registry"
 
-		// Determine pass/fail based on policy
-		// This is a simple example - adjust based on your policy
-		if result.Critical > 0 {
-			imageScan.Status.Phase = securityv1alpha1.ScanPhaseFailed
-			imageScan.Status.Message = "Critical vulnerabilities found"
-		} else {
-			imageScan.Status.Phase = securityv1alpha1.ScanPhasePassed
-			imageScan.Status.Message = "Scan completed successfully"
-		}
-
-		logger.Info("Scan completed",
+		logger.Info("Image found in Aqua, scan passed",
 			"image", imageScan.Spec.Image,
-			"phase", imageScan.Status.Phase,
-			"critical", result.Critical,
-			"high", result.High)
+			"digest", imageScan.Spec.Digest)
 
-		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{}, nil
-
-	case aqua.StatusFailed:
-		now := metav1.Now()
-		imageScan.Status.Phase = securityv1alpha1.ScanPhaseFailed
-		imageScan.Status.CompletedTime = &now
-		imageScan.Status.Message = "Aqua scan failed"
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
