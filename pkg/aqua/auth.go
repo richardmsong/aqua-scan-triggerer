@@ -36,7 +36,8 @@ func (tm *TokenManager) GetToken() string {
 }
 
 // SignRequest adds HMAC256 signature to a request
-// The signature is computed over: HTTP_METHOD + URL + TIMESTAMP + REQUEST_BODY
+// The signature is computed over: timestamp + method + path + body (concatenated without separators)
+// This matches the Aqua CSPM API token signing format
 func (tm *TokenManager) SignRequest(req *http.Request, body []byte) error {
 	if tm.config.HMACSecret == "" {
 		return nil // No signing configured
@@ -44,11 +45,12 @@ func (tm *TokenManager) SignRequest(req *http.Request, body []byte) error {
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	// Build the string to sign
-	stringToSign := fmt.Sprintf("%s\n%s\n%s\n%s",
-		req.Method,
-		req.URL.String(),
+	// Build the string to sign: timestamp + method + path + body
+	// Using the path only (not full URL) as per Aqua API spec
+	stringToSign := fmt.Sprintf("%s%s%s%s",
 		timestamp,
+		req.Method,
+		req.URL.Path,
 		string(body),
 	)
 

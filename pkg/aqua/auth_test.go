@@ -68,14 +68,16 @@ var _ = Describe("HMAC256 Signing", func() {
 
 		It("should generate consistent signatures for same input", func() {
 			// Use same timestamp by directly calling computeHMAC256
-			message := "GET\nhttps://api.aquasec.com/test\n2024-01-01T00:00:00Z\n"
+			// Format: timestamp + method + path + body (no separators)
+			message := "2024-01-01T00:00:00ZGET/test"
 			sig1 := computeHMAC256(message, "my-secret-key")
 			sig2 := computeHMAC256(message, "my-secret-key")
 			Expect(sig1).To(Equal(sig2))
 		})
 
 		It("should generate different signatures for different secrets", func() {
-			message := "GET\nhttps://api.aquasec.com/test\n2024-01-01T00:00:00Z\n"
+			// Format: timestamp + method + path + body (no separators)
+			message := "2024-01-01T00:00:00ZGET/test"
 			sig1 := computeHMAC256(message, "secret-1")
 			sig2 := computeHMAC256(message, "secret-2")
 			Expect(sig1).NotTo(Equal(sig2))
