@@ -1,7 +1,13 @@
 package aqua
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -9,100 +15,180 @@ import (
 
 var _ = Describe("TokenManager", func() {
 	Describe("GetToken", func() {
-		It("should return configured token", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
-				Token: "my-static-token",
+		It("should fetch token from Aqua API", func() {
+			// Set up mock server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify request
+				Expect(r.Method).To(Equal("POST"))
+				Expect(r.URL.Path).To(Equal("/v2/tokens"))
+				Expect(r.Header.Get("X-API-Key")).To(Equal("my-api-key"))
+				Expect(r.Header.Get("X-Timestamp")).NotTo(BeEmpty())
+				Expect(r.Header.Get("X-Signature")).NotTo(BeEmpty())
+				Expect(r.Header.Get("Content-Type")).To(Equal("application/json"))
+
+				// Return mock token
+				resp := tokenResponse{
+					Status: 200,
+					Code:   0,
+					Data:   "mock-bearer-token-12345",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			tm := NewTokenManager(server.URL, AuthConfig{
+				APIKey:     "my-api-key",
+				HMACSecret: "my-secret",
 			}, &http.Client{}, false)
 
-			token := tm.GetToken()
-			Expect(token).To(Equal("my-static-token"))
+			token, err := tm.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(token).To(Equal("mock-bearer-token-12345"))
 		})
 
-		It("should return same token on multiple calls", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
-				Token: "my-static-token",
+		It("should cache token and reuse it", func() {
+			var requestCount int32
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&requestCount, 1)
+				resp := tokenResponse{
+					Status: 200,
+					Code:   0,
+					Data:   "cached-token",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			tm := NewTokenManager(server.URL, AuthConfig{
+				APIKey:     "my-api-key",
+				HMACSecret: "my-secret",
 			}, &http.Client{}, false)
 
-			token1 := tm.GetToken()
-			token2 := tm.GetToken()
+			// First call
+			token1, err := tm.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(token1).To(Equal("cached-token"))
 
-			Expect(token1).To(Equal(token2))
+			// Second call should use cache
+			token2, err := tm.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(token2).To(Equal("cached-token"))
+
+			// Should only have made one request
+			Expect(atomic.LoadInt32(&requestCount)).To(Equal(int32(1)))
 		})
 
-		It("should return empty string when no token configured", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{}, &http.Client{}, false)
+		It("should handle concurrent token requests", func() {
+			var requestCount int32
 
-			token := tm.GetToken()
-			Expect(token).To(BeEmpty())
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&requestCount, 1)
+				// Add slight delay to simulate network
+				time.Sleep(10 * time.Millisecond)
+				resp := tokenResponse{
+					Status: 200,
+					Code:   0,
+					Data:   "concurrent-token",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			tm := NewTokenManager(server.URL, AuthConfig{
+				APIKey:     "my-api-key",
+				HMACSecret: "my-secret",
+			}, &http.Client{}, false)
+
+			// Make concurrent requests
+			var wg sync.WaitGroup
+			tokens := make([]string, 10)
+			errors := make([]error, 10)
+
+			for i := 0; i < 10; i++ {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					tokens[idx], errors[idx] = tm.GetToken(context.Background())
+				}(i)
+			}
+
+			wg.Wait()
+
+			// All should have succeeded with the same token
+			for i := 0; i < 10; i++ {
+				Expect(errors[i]).NotTo(HaveOccurred())
+				Expect(tokens[i]).To(Equal("concurrent-token"))
+			}
+
+			// Should only have made one request due to locking
+			Expect(atomic.LoadInt32(&requestCount)).To(Equal(int32(1)))
+		})
+
+		It("should return error when API returns non-200", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte("invalid credentials"))
+			}))
+			defer server.Close()
+
+			tm := NewTokenManager(server.URL, AuthConfig{
+				APIKey:     "bad-key",
+				HMACSecret: "my-secret",
+			}, &http.Client{}, false)
+
+			_, err := tm.GetToken(context.Background())
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("token request failed with status 401"))
+		})
+
+		It("should return error when response has empty token", func() {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				resp := tokenResponse{
+					Status: 200,
+					Code:   0,
+					Data:   "",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer server.Close()
+
+			tm := NewTokenManager(server.URL, AuthConfig{
+				APIKey:     "my-api-key",
+				HMACSecret: "my-secret",
+			}, &http.Client{}, false)
+
+			_, err := tm.GetToken(context.Background())
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("empty token"))
 		})
 	})
 })
 
 var _ = Describe("HMAC256 Signing", func() {
-	Describe("SignRequest", func() {
-		It("should not add headers when HMAC secret is empty", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
-				Token:      "test-token",
-				HMACSecret: "",
-			}, &http.Client{}, false)
-
-			req, _ := http.NewRequest("GET", "https://api.aquasec.com/test", nil)
-			err := tm.SignRequest(req, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(req.Header.Get("X-Timestamp")).To(BeEmpty())
-			Expect(req.Header.Get("X-Signature")).To(BeEmpty())
-		})
-
-		It("should add signature headers when HMAC secret is set", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
-				Token:      "test-token",
-				HMACSecret: "my-secret-key",
-			}, &http.Client{}, false)
-
-			req, _ := http.NewRequest("GET", "https://api.aquasec.com/test", nil)
-			err := tm.SignRequest(req, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(req.Header.Get("X-Timestamp")).NotTo(BeEmpty())
-			Expect(req.Header.Get("X-Signature")).NotTo(BeEmpty())
-		})
-
+	Describe("computeHMAC256", func() {
 		It("should generate consistent signatures for same input", func() {
-			// Use same timestamp by directly calling computeHMAC256
-			// Format: timestamp + method + path + body (no separators)
-			message := "2024-01-01T00:00:00ZGET/test"
+			message := "1234567890POSTv2/tokens{\"validity\":240}"
 			sig1 := computeHMAC256(message, "my-secret-key")
 			sig2 := computeHMAC256(message, "my-secret-key")
 			Expect(sig1).To(Equal(sig2))
 		})
 
 		It("should generate different signatures for different secrets", func() {
-			// Format: timestamp + method + path + body (no separators)
-			message := "2024-01-01T00:00:00ZGET/test"
+			message := "1234567890POSTv2/tokens{\"validity\":240}"
 			sig1 := computeHMAC256(message, "secret-1")
 			sig2 := computeHMAC256(message, "secret-2")
 			Expect(sig1).NotTo(Equal(sig2))
 		})
 
-		It("should include request body in signature", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
-				Token:      "test-token",
-				HMACSecret: "my-secret-key",
-			}, &http.Client{}, false)
-
-			req1, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)
-			req2, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)
-
-			err := tm.SignRequest(req1, []byte(`{"foo":"bar"}`))
-			Expect(err).NotTo(HaveOccurred())
-			err = tm.SignRequest(req2, []byte(`{"foo":"baz"}`))
-			Expect(err).NotTo(HaveOccurred())
-
-			// Different bodies should produce different signatures
-			// (though timestamps might also differ, making them different anyway)
-			sig1 := req1.Header.Get("X-Signature")
-			sig2 := req2.Header.Get("X-Signature")
-			Expect(sig1).NotTo(BeEmpty())
-			Expect(sig2).NotTo(BeEmpty())
+		It("should generate different signatures for different messages", func() {
+			sig1 := computeHMAC256("message1", "my-secret")
+			sig2 := computeHMAC256("message2", "my-secret")
+			Expect(sig1).NotTo(Equal(sig2))
 		})
 	})
 
@@ -145,12 +231,13 @@ var _ = Describe("NewClient with Auth", func() {
 		// The client should work with the legacy APIKey
 	})
 
-	It("should use Auth.Token when provided", func() {
+	It("should use Auth.APIKey when provided", func() {
 		client := NewClient(Config{
 			BaseURL:  "https://api.aquasec.com",
 			Registry: "test-registry",
 			Auth: AuthConfig{
-				Token: "new-style-token",
+				APIKey:     "new-style-api-key",
+				HMACSecret: "my-hmac-secret",
 			},
 		})
 
@@ -162,7 +249,7 @@ var _ = Describe("NewClient with Auth", func() {
 			BaseURL:  "https://api.aquasec.com",
 			Registry: "test-registry",
 			Auth: AuthConfig{
-				Token:      "test-token",
+				APIKey:     "test-api-key",
 				HMACSecret: "my-hmac-secret",
 			},
 		})

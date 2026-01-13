@@ -1,89 +1,183 @@
 package aqua
 
 import (
+	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
-	// Token is the API token for authentication
-	Token string
+	// APIKey is the API key for authentication (used in X-API-Key header)
+	APIKey string
 
-	// HMACSecret is used for HMAC256 request signing (optional)
+	// HMACSecret is used for HMAC256 request signing
 	HMACSecret string
+
+	// TokenValidity is the token validity in minutes (default: 240)
+	TokenValidity int
 }
 
-// TokenManager handles token and request signing
+// tokenResponse is the response from POST /v2/tokens
+type tokenResponse struct {
+	Status int    `json:"status"`
+	Code   int    `json:"code"`
+	Data   string `json:"data"`
+}
+
+// tokenRequest is the request body for POST /v2/tokens
+type tokenRequest struct {
+	Validity         int      `json:"validity"`
+	AllowedEndpoints []string `json:"allowed_endpoints"`
+}
+
+// TokenManager handles token acquisition and request signing
 type TokenManager struct {
-	config  AuthConfig
-	verbose bool
+	baseURL    string
+	config     AuthConfig
+	httpClient *http.Client
+	verbose    bool
+
+	// Token cache
+	mu         sync.RWMutex
+	token      string
+	tokenExpAt time.Time
 }
 
 // NewTokenManager creates a new token manager
 func NewTokenManager(baseURL string, config AuthConfig, httpClient *http.Client, verbose bool) *TokenManager {
+	if config.TokenValidity == 0 {
+		config.TokenValidity = 240 // Default 240 minutes
+	}
 	return &TokenManager{
-		config:  config,
-		verbose: verbose,
+		baseURL:    baseURL,
+		config:     config,
+		httpClient: httpClient,
+		verbose:    verbose,
 	}
 }
 
-// GetToken returns the configured token
-func (tm *TokenManager) GetToken() string {
-	token := tm.config.Token
-	if tm.verbose {
-		if token == "" {
-			log.Printf("[AUTH] GetToken: token is EMPTY")
-		} else {
-			masked := token[:min(6, len(token))] + "..."
-			log.Printf("[AUTH] GetToken: using token %s (len=%d)", masked, len(token))
-		}
-	}
-	return token
-}
-
-// SignRequest adds HMAC256 signature to a request
-// The signature is computed over: timestamp + method + path + body (concatenated without separators)
-// This matches the Aqua CSPM API token signing format
-func (tm *TokenManager) SignRequest(req *http.Request, body []byte) error {
-	if tm.config.HMACSecret == "" {
+// GetToken returns a valid bearer token, fetching a new one if necessary
+// The token is obtained by making a HMAC-signed request to POST /v2/tokens
+func (tm *TokenManager) GetToken(ctx context.Context) (string, error) {
+	// Check if we have a valid cached token
+	tm.mu.RLock()
+	if tm.token != "" && time.Now().Before(tm.tokenExpAt) {
+		token := tm.token
+		tm.mu.RUnlock()
 		if tm.verbose {
-			log.Printf("[AUTH] SignRequest: HMAC signing not configured (no secret)")
+			masked := token[:min(6, len(token))] + "..."
+			log.Printf("[AUTH] GetToken: using cached token %s (expires in %v)", masked, time.Until(tm.tokenExpAt))
 		}
-		return nil // No signing configured
+		return token, nil
+	}
+	tm.mu.RUnlock()
+
+	// Need to fetch a new token
+	return tm.fetchToken(ctx)
+}
+
+// fetchToken fetches a new bearer token from the Aqua API
+func (tm *TokenManager) fetchToken(ctx context.Context) (string, error) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if tm.token != "" && time.Now().Before(tm.tokenExpAt) {
+		return tm.token, nil
 	}
 
+	// Build request body
+	reqBody := tokenRequest{
+		Validity:         tm.config.TokenValidity,
+		AllowedEndpoints: []string{"GET", "POST", "PUT", "DELETE"},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshaling token request: %w", err)
+	}
+
+	// Build the request
+	url := tm.baseURL + "/v2/tokens"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("creating token request: %w", err)
+	}
+
+	// Generate timestamp
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
-	// Build the string to sign: timestamp + method + path + body
-	// Using the path only (not full URL) as per Aqua API spec
+	// Build string to sign: timestamp + method + path + body
 	stringToSign := fmt.Sprintf("%s%s%s%s",
 		timestamp,
-		req.Method,
-		req.URL.Path,
-		string(body),
+		"POST",
+		"/v2/tokens",
+		string(bodyBytes),
 	)
 
 	// Compute HMAC256 signature
 	signature := computeHMAC256(stringToSign, tm.config.HMACSecret)
 
 	if tm.verbose {
-		log.Printf("[AUTH] SignRequest: %s %s", req.Method, req.URL.Path)
-		log.Printf("[AUTH] SignRequest: timestamp=%s", timestamp)
-		log.Printf("[AUTH] SignRequest: signature=%s... (len=%d)", signature[:min(16, len(signature))], len(signature))
+		log.Printf("[AUTH] fetchToken: requesting new token from %s", url)
+		log.Printf("[AUTH] fetchToken: timestamp=%s", timestamp)
+		log.Printf("[AUTH] fetchToken: signature=%s... (len=%d)", signature[:min(16, len(signature))], len(signature))
 	}
 
-	// Add signature headers (per Aqua API spec)
-	req.Header.Set("X-API-Key", tm.config.Token)
+	// Set headers per Aqua API spec
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", tm.config.APIKey)
 	req.Header.Set("X-Timestamp", timestamp)
 	req.Header.Set("X-Signature", signature)
 
-	return nil
+	// Execute request
+	resp, err := tm.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("executing token request: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	// Read response body
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return "", fmt.Errorf("reading token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse response
+	var tokenResp tokenResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return "", fmt.Errorf("parsing token response: %w", err)
+	}
+
+	if tokenResp.Data == "" {
+		return "", fmt.Errorf("empty token in response: %s", string(respBody))
+	}
+
+	// Cache the token with expiration (use 90% of validity to refresh early)
+	tm.token = tokenResp.Data
+	tm.tokenExpAt = time.Now().Add(time.Duration(float64(tm.config.TokenValidity)*0.9) * time.Minute)
+
+	if tm.verbose {
+		masked := tm.token[:min(6, len(tm.token))] + "..."
+		log.Printf("[AUTH] fetchToken: obtained token %s (expires at %v)", masked, tm.tokenExpAt)
+	}
+
+	return tm.token, nil
 }
 
 // computeHMAC256 computes HMAC-SHA256 signature

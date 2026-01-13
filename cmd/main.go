@@ -73,7 +73,7 @@ func main() {
 	aquaClient := aqua.NewClient(aqua.Config{
 		BaseURL: aquaURL,
 		Auth: aqua.AuthConfig{
-			Token:      aquaAPIKey,
+			APIKey:     aquaAPIKey,
 			HMACSecret: aquaHMACSecret,
 		},
 		Timeout: 30 * time.Second,

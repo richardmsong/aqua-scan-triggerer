@@ -163,7 +163,7 @@ func run(ctx context.Context, cfg *Config, input io.Reader) error {
 		Timeout:  cfg.Timeout,
 		Verbose:  cfg.Verbose,
 		Auth: aqua.AuthConfig{
-			Token:      cfg.AquaAPIKey,
+			APIKey:     cfg.AquaAPIKey,
 			HMACSecret: cfg.AquaHMACSecret,
 		},
 	})
