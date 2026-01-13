@@ -90,6 +90,9 @@ type Config struct {
 
 	// CacheTTL is the time-to-live for cached registry data (default: 1 hour)
 	CacheTTL time.Duration
+
+	// Verbose enables debug logging for authentication
+	Verbose bool
 }
 
 // registryCache holds cached registry data with timestamp
@@ -126,7 +129,7 @@ func NewClient(config Config) Client {
 		config.Auth.Token = config.APIKey
 	}
 
-	tokenManager := NewTokenManager(config.BaseURL, config.Auth, httpClient)
+	tokenManager := NewTokenManager(config.BaseURL, config.Auth, httpClient, config.Verbose)
 
 	return &aquaClient{
 		config:       config,
@@ -332,8 +335,14 @@ func (c *aquaClient) fetchRegistries(ctx context.Context) ([]Registry, error) {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	token := c.tokenManager.GetToken()
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+
+	// Add HMAC signature if configured
+	if err := c.tokenManager.SignRequest(req, nil); err != nil {
+		return nil, fmt.Errorf("signing request: %w", err)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

@@ -12,7 +12,7 @@ var _ = Describe("TokenManager", func() {
 		It("should return configured token", func() {
 			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
 				Token: "my-static-token",
-			}, &http.Client{})
+			}, &http.Client{}, false)
 
 			token := tm.GetToken()
 			Expect(token).To(Equal("my-static-token"))
@@ -21,7 +21,7 @@ var _ = Describe("TokenManager", func() {
 		It("should return same token on multiple calls", func() {
 			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
 				Token: "my-static-token",
-			}, &http.Client{})
+			}, &http.Client{}, false)
 
 			token1 := tm.GetToken()
 			token2 := tm.GetToken()
@@ -30,7 +30,7 @@ var _ = Describe("TokenManager", func() {
 		})
 
 		It("should return empty string when no token configured", func() {
-			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{}, &http.Client{})
+			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{}, &http.Client{}, false)
 
 			token := tm.GetToken()
 			Expect(token).To(BeEmpty())
@@ -44,7 +44,7 @@ var _ = Describe("HMAC256 Signing", func() {
 			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
 				Token:      "test-token",
 				HMACSecret: "",
-			}, &http.Client{})
+			}, &http.Client{}, false)
 
 			req, _ := http.NewRequest("GET", "https://api.aquasec.com/test", nil)
 			err := tm.SignRequest(req, nil)
@@ -57,7 +57,7 @@ var _ = Describe("HMAC256 Signing", func() {
 			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
 				Token:      "test-token",
 				HMACSecret: "my-secret-key",
-			}, &http.Client{})
+			}, &http.Client{}, false)
 
 			req, _ := http.NewRequest("GET", "https://api.aquasec.com/test", nil)
 			err := tm.SignRequest(req, nil)
@@ -87,7 +87,7 @@ var _ = Describe("HMAC256 Signing", func() {
 			tm := NewTokenManager("https://api.aquasec.com", AuthConfig{
 				Token:      "test-token",
 				HMACSecret: "my-secret-key",
-			}, &http.Client{})
+			}, &http.Client{}, false)
 
 			req1, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)
 			req2, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)

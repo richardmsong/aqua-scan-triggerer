@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 )
@@ -20,19 +21,30 @@ type AuthConfig struct {
 
 // TokenManager handles token and request signing
 type TokenManager struct {
-	config AuthConfig
+	config  AuthConfig
+	verbose bool
 }
 
 // NewTokenManager creates a new token manager
-func NewTokenManager(baseURL string, config AuthConfig, httpClient *http.Client) *TokenManager {
+func NewTokenManager(baseURL string, config AuthConfig, httpClient *http.Client, verbose bool) *TokenManager {
 	return &TokenManager{
-		config: config,
+		config:  config,
+		verbose: verbose,
 	}
 }
 
 // GetToken returns the configured token
 func (tm *TokenManager) GetToken() string {
-	return tm.config.Token
+	token := tm.config.Token
+	if tm.verbose {
+		if token == "" {
+			log.Printf("[AUTH] GetToken: token is EMPTY")
+		} else {
+			masked := token[:min(6, len(token))] + "..."
+			log.Printf("[AUTH] GetToken: using token %s (len=%d)", masked, len(token))
+		}
+	}
+	return token
 }
 
 // SignRequest adds HMAC256 signature to a request
@@ -40,10 +52,13 @@ func (tm *TokenManager) GetToken() string {
 // This matches the Aqua CSPM API token signing format
 func (tm *TokenManager) SignRequest(req *http.Request, body []byte) error {
 	if tm.config.HMACSecret == "" {
+		if tm.verbose {
+			log.Printf("[AUTH] SignRequest: HMAC signing not configured (no secret)")
+		}
 		return nil // No signing configured
 	}
 
-	timestamp := time.Now().UTC().Format(time.RFC3339)
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
 	// Build the string to sign: timestamp + method + path + body
 	// Using the path only (not full URL) as per Aqua API spec
@@ -57,9 +72,16 @@ func (tm *TokenManager) SignRequest(req *http.Request, body []byte) error {
 	// Compute HMAC256 signature
 	signature := computeHMAC256(stringToSign, tm.config.HMACSecret)
 
-	// Add signature headers
-	req.Header.Set("X-Aqua-Timestamp", timestamp)
-	req.Header.Set("X-Aqua-Signature", signature)
+	if tm.verbose {
+		log.Printf("[AUTH] SignRequest: %s %s", req.Method, req.URL.Path)
+		log.Printf("[AUTH] SignRequest: timestamp=%s", timestamp)
+		log.Printf("[AUTH] SignRequest: signature=%s... (len=%d)", signature[:min(16, len(signature))], len(signature))
+	}
+
+	// Add signature headers (per Aqua API spec)
+	req.Header.Set("X-API-Key", tm.config.Token)
+	req.Header.Set("X-Timestamp", timestamp)
+	req.Header.Set("X-Signature", signature)
 
 	return nil
 }
