@@ -41,6 +41,7 @@ func main() {
 		excludedNamespaces   string
 		scanNamespace        string
 		rescanInterval       time.Duration
+		registryMirrors      string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -51,6 +52,7 @@ func main() {
 	flag.StringVar(&excludedNamespaces, "excluded-namespaces", "kube-system,kube-public,cert-manager", "Comma-separated namespaces to exclude")
 	flag.StringVar(&scanNamespace, "scan-namespace", "", "Namespace for ImageScan CRs (empty = same as pod)")
 	flag.DurationVar(&rescanInterval, "rescan-interval", 24*time.Hour, "Interval for rescanning images")
+	flag.StringVar(&registryMirrors, "registry-mirrors", os.Getenv("REGISTRY_MIRRORS"), "Comma-separated registry mirror mappings in format source=mirror (e.g., docker.io=artifactory.internal.com/docker-remote,gcr.io=artifactory.internal.com/gcr-remote)")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -67,11 +69,39 @@ func main() {
 		}
 	}
 
+	// Parse registry mirrors
+	var mirrors []aqua.RegistryMirror
+	if registryMirrors != "" {
+		for _, mapping := range strings.Split(registryMirrors, ",") {
+			mapping = strings.TrimSpace(mapping)
+			if mapping == "" {
+				continue
+			}
+			parts := strings.SplitN(mapping, "=", 2)
+			if len(parts) != 2 {
+				setupLog.Error(nil, "invalid registry mirror format, expected source=mirror", "mapping", mapping)
+				os.Exit(1)
+			}
+			source := strings.TrimSpace(parts[0])
+			mirror := strings.TrimSpace(parts[1])
+			if source == "" || mirror == "" {
+				setupLog.Error(nil, "invalid registry mirror format, source and mirror cannot be empty", "mapping", mapping)
+				os.Exit(1)
+			}
+			mirrors = append(mirrors, aqua.RegistryMirror{
+				Source: source,
+				Mirror: mirror,
+			})
+			setupLog.Info("configured registry mirror", "source", source, "mirror", mirror)
+		}
+	}
+
 	// Create Aqua client
 	aquaClient := aqua.NewClient(aqua.Config{
-		BaseURL: aquaURL,
-		APIKey:  aquaAPIKey,
-		Timeout: 30 * time.Second,
+		BaseURL:         aquaURL,
+		APIKey:          aquaAPIKey,
+		Timeout:         30 * time.Second,
+		RegistryMirrors: mirrors,
 	})
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
