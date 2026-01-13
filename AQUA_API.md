@@ -463,7 +463,6 @@ Triggers a scan for a specified image by registering it with Aqua.
 
 **Response Codes**:
 - `201 Created`: Image registered and scan triggered successfully
-- `409 Conflict`: Image already exists/being scanned (treat as success)
 - `400 Bad Request`: Invalid request parameters
 - `401 Unauthorized`: Invalid or expired token
 

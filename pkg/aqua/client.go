@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -113,16 +113,11 @@ func (c *aquaClient) GetScanResult(ctx context.Context, image, digest string) (*
 		return nil, err
 	}
 
-	// Build URL using path.Join for proper path construction
-	baseURL, err := url.Parse(c.config.BaseURL)
+	// Build URL using url.JoinPath for proper URL construction
+	apiURL, err := url.JoinPath(c.config.BaseURL, "api", "v2", "images", registry, imageName, tag)
 	if err != nil {
-		return nil, fmt.Errorf("parsing base URL: %w", err)
+		return nil, fmt.Errorf("building API URL: %w", err)
 	}
-
-	// Construct the API path
-	apiPath := path.Join("api", "v2", "images", registry, imageName, tag)
-	baseURL.Path = path.Join(baseURL.Path, apiPath)
-	apiURL := baseURL.String()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -159,7 +154,9 @@ func (c *aquaClient) GetScanResult(ctx context.Context, image, digest string) (*
 		}, nil
 	}
 
-	return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	// Read response body for error details
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(bodyBytes))
 }
 
 // triggerScanRequest is the request body for POST /api/v2/images
@@ -191,15 +188,11 @@ func (c *aquaClient) TriggerScan(ctx context.Context, image, digest string) (str
 		return "", fmt.Errorf("marshaling request body: %w", err)
 	}
 
-	// Build URL using path.Join for proper path construction
-	baseURL, err := url.Parse(c.config.BaseURL)
+	// Build URL using url.JoinPath for proper URL construction
+	apiURL, err := url.JoinPath(c.config.BaseURL, "api", "v2", "images")
 	if err != nil {
-		return "", fmt.Errorf("parsing base URL: %w", err)
+		return "", fmt.Errorf("building API URL: %w", err)
 	}
-
-	apiPath := path.Join("api", "v2", "images")
-	baseURL.Path = path.Join(baseURL.Path, apiPath)
-	apiURL := baseURL.String()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -224,5 +217,7 @@ func (c *aquaClient) TriggerScan(ctx context.Context, image, digest string) (str
 		return fmt.Sprintf("%s/%s", registry, imageWithDigest), nil
 	}
 
-	return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	// Read response body for error details
+	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return "", fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(respBodyBytes))
 }
