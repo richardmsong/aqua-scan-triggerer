@@ -141,13 +141,14 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		case securityv1alpha1.ScanPhaseRegistered:
 			// Good, continue checking other images
 			continue
-		case securityv1alpha1.ScanPhaseFailed:
-			// Scan failed - don't remove gate, emit event
+		case securityv1alpha1.ScanPhaseError:
+			// Error occurred - don't remove gate, emit event
 			if r.Recorder != nil {
-				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanFailed",
-					"Image %s failed security scan: %s", img.image, imageScan.Status.Message)
+				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanError",
+					"Image %s scan error: %s", img.image, imageScan.Status.Message)
 			}
 			allPassed = false
+			pendingImages = append(pendingImages, img.image)
 		default:
 			// Still pending
 			allPassed = false

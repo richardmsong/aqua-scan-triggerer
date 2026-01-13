@@ -102,8 +102,8 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
-		// Requeue to check if the scan has been processed
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		// Requeue immediately to check if the image has been registered
+		return ctrl.Result{Requeue: true}, nil
 
 	case aqua.StatusFound:
 		// Image found in Aqua (not 404) - it's registered

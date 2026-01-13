@@ -149,9 +149,7 @@ spec:
                 description: Phase is the current phase of the scan
                 enum:
                 - Pending
-                - InProgress
                 - Registered
-                - Failed
                 - Error
                 type: string
               retryCount:

@@ -2,8 +2,9 @@ package controller
 
 import (
 	"context"
-	"testing"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,68 +15,78 @@ import (
 	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
 )
 
-func TestPodGateReconciler_RemovesGateWhenAllImagesRegistered(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = securityv1alpha1.AddToScheme(scheme)
+var _ = Describe("PodGateReconciler", func() {
+	var (
+		scheme *runtime.Scheme
+		ctx    context.Context
+	)
 
-	// Create a pod with our gate
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
-		Spec: corev1.PodSpec{
-			SchedulingGates: []corev1.PodSchedulingGate{
-				{Name: SchedulingGateName},
-			},
-			Containers: []corev1.Container{
-				{Name: "app", Image: "nginx:latest"},
-			},
-		},
-	}
-
-	// Create a registered ImageScan
-	imageScan := &securityv1alpha1.ImageScan{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      imageScanName(imageRef{image: "nginx:latest"}),
-			Namespace: "default",
-		},
-		Spec: securityv1alpha1.ImageScanSpec{
-			Image: "nginx:latest",
-		},
-		Status: securityv1alpha1.ImageScanStatus{
-			Phase: securityv1alpha1.ScanPhaseRegistered,
-		},
-	}
-
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(pod, imageScan).
-		Build()
-
-	r := &PodGateReconciler{
-		Client: client,
-		Scheme: scheme,
-	}
-
-	_, err := r.Reconcile(context.Background(), reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(corev1.AddToScheme(scheme)).To(Succeed())
+		Expect(securityv1alpha1.AddToScheme(scheme)).To(Succeed())
+		ctx = context.Background()
 	})
-	if err != nil {
-		t.Fatalf("Reconcile failed: %v", err)
-	}
 
-	// Verify gate was removed
-	var updatedPod corev1.Pod
-	_ = client.Get(context.Background(), types.NamespacedName{
-		Name: "test-pod", Namespace: "default",
-	}, &updatedPod)
+	Describe("Reconcile", func() {
+		Context("when all images are registered", func() {
+			It("should remove the scheduling gate", func() {
+				// Create a pod with our gate
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						SchedulingGates: []corev1.PodSchedulingGate{
+							{Name: SchedulingGateName},
+						},
+						Containers: []corev1.Container{
+							{Name: "app", Image: "nginx:latest"},
+						},
+					},
+				}
 
-	if hasSchedulingGate(&updatedPod, SchedulingGateName) {
-		t.Error("Expected scheduling gate to be removed")
-	}
-}
+				// Create a registered ImageScan
+				imageScan := &securityv1alpha1.ImageScan{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      imageScanName(imageRef{image: "nginx:latest"}),
+						Namespace: "default",
+					},
+					Spec: securityv1alpha1.ImageScanSpec{
+						Image: "nginx:latest",
+					},
+					Status: securityv1alpha1.ImageScanStatus{
+						Phase: securityv1alpha1.ScanPhaseRegistered,
+					},
+				}
+
+				client := fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithObjects(pod, imageScan).
+					Build()
+
+				r := &PodGateReconciler{
+					Client: client,
+					Scheme: scheme,
+				}
+
+				_, err := r.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      "test-pod",
+						Namespace: "default",
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Verify gate was removed
+				var updatedPod corev1.Pod
+				err = client.Get(ctx, types.NamespacedName{
+					Name: "test-pod", Namespace: "default",
+				}, &updatedPod)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(hasSchedulingGate(&updatedPod, SchedulingGateName)).To(BeFalse())
+			})
+		})
+	})
+})
