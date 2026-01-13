@@ -1,36 +1,32 @@
 package aqua
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"time"
+
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 // ScanStatus represents the status returned by Aqua
 type ScanStatus string
 
 const (
-	StatusNotFound  ScanStatus = "not_found"
-	StatusQueued    ScanStatus = "queued"
-	StatusScanning  ScanStatus = "scanning"
-	StatusCompleted ScanStatus = "completed"
-	StatusFailed    ScanStatus = "failed"
+	StatusNotFound ScanStatus = "not_found"
+	StatusFound    ScanStatus = "found"
 )
 
 // ScanResult contains the results from Aqua
+// With v2 API, we only care about whether the image was found (scanned) or not
 type ScanResult struct {
-	ScanID           string
-	Status           ScanStatus
-	Image            string
-	Digest           string
-	Critical         int
-	High             int
-	Medium           int
-	Low              int
-	CompliancePassed bool
-	ScanTime         time.Time
+	Status ScanStatus
+	Image  string
+	Digest string
 }
 
 // Client interface for Aqua operations
@@ -40,9 +36,6 @@ type Client interface {
 
 	// TriggerScan initiates a new scan for an image
 	TriggerScan(ctx context.Context, image, digest string) (string, error)
-
-	// GetScanStatus checks the status of a specific scan
-	GetScanStatus(ctx context.Context, scanID string) (*ScanResult, error)
 }
 
 // Config holds Aqua client configuration
@@ -52,6 +45,9 @@ type Config struct {
 
 	// APIKey for authentication
 	APIKey string
+
+	// Registry is the Aqua registry name to use for scans
+	Registry string
 
 	// Timeout for API calls
 	Timeout time.Duration
@@ -79,14 +75,51 @@ func NewClient(config Config) Client {
 	}
 }
 
+// parseImageReference extracts registry and image parts from a full image reference
+// using go-containerregistry/pkg/name for proper parsing.
+// Example: "richardmsong/jfrog-token-exchanger" with digest "sha256:abc123..."
+// returns registry from config or parsed, image name, and @sha256:... as tag
+func parseImageReference(image, digest, defaultRegistry string) (registry, imageName, tag string, err error) {
+	// Parse the image reference using go-containerregistry
+	ref, parseErr := name.ParseReference(image)
+	if parseErr != nil {
+		return "", "", "", fmt.Errorf("parsing image reference: %w", parseErr)
+	}
+
+	// Extract the registry from the parsed reference
+	registry = ref.Context().RegistryStr()
+
+	// If a default registry is configured, use it instead
+	if defaultRegistry != "" {
+		registry = defaultRegistry
+	}
+
+	// Get the repository path (without registry)
+	imageName = ref.Context().RepositoryStr()
+
+	// Tag is the digest prefixed with @
+	tag = "@" + digest
+
+	return registry, imageName, tag, nil
+}
+
 func (c *aquaClient) GetScanResult(ctx context.Context, image, digest string) (*ScanResult, error) {
-	// Implementation will call Aqua's API
-	// GET /api/v2/images/{registry}/{repo}/{tag}/scan_results
-	// or GET /api/v2/images/by_digest/{digest}
+	// GET /api/v2/images/{registry}/{image}/{tag}
+	// where tag is @sha256:...
+	// If not 404, consider it scanned/passed
 
-	url := fmt.Sprintf("%s/api/v2/images/by_digest/%s", c.config.BaseURL, digest)
+	registry, imageName, tag, err := parseImageReference(image, digest, c.config.Registry)
+	if err != nil {
+		return nil, err
+	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	// Build URL using url.JoinPath for proper URL construction
+	apiURL, err := url.JoinPath(c.config.BaseURL, "api", "v2", "images", registry, imageName, tag)
+	if err != nil {
+		return nil, fmt.Errorf("building API URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -102,33 +135,89 @@ func (c *aquaClient) GetScanResult(ctx context.Context, image, digest string) (*
 		_ = resp.Body.Close()
 	}()
 
+	// 404 means not scanned yet
 	if resp.StatusCode == http.StatusNotFound {
-		return &ScanResult{Status: StatusNotFound}, nil
+		return &ScanResult{
+			Status: StatusNotFound,
+			Image:  image,
+			Digest: digest,
+		}, nil
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	// Any other non-error response means the image has been scanned
+	// We don't care about the enforcement - Aqua enforcer handles that
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return &ScanResult{
+			Status: StatusFound,
+			Image:  image,
+			Digest: digest,
+		}, nil
 	}
 
-	var result ScanResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
-	}
+	// Read response body for error details
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(bodyBytes))
+}
 
-	return &result, nil
+// triggerScanRequest is the request body for POST /api/v2/images
+type triggerScanRequest struct {
+	Registry string `json:"registry"`
+	Image    string `json:"image"`
 }
 
 func (c *aquaClient) TriggerScan(ctx context.Context, image, digest string) (string, error) {
-	// Implementation will call Aqua's API to trigger a scan
-	// POST /api/v2/images/scan
+	// POST /api/v2/images
+	// Body: {"registry": "...", "image": "imagename@sha256:..."}
 
-	// Return scan ID for tracking
-	return "", fmt.Errorf("not implemented - implement based on your Aqua API version")
-}
+	registry, imageName, _, err := parseImageReference(image, digest, c.config.Registry)
+	if err != nil {
+		return "", err
+	}
 
-func (c *aquaClient) GetScanStatus(ctx context.Context, scanID string) (*ScanResult, error) {
-	// Implementation will check scan status
-	// GET /api/v2/scans/{scanID}
+	// Build the image reference with digest for the API
+	// Format: imagename@sha256:...
+	imageWithDigest := imageName + "@" + digest
 
-	return nil, fmt.Errorf("not implemented - implement based on your Aqua API version")
+	reqBody := triggerScanRequest{
+		Registry: registry,
+		Image:    imageWithDigest,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshaling request body: %w", err)
+	}
+
+	// Build URL using url.JoinPath for proper URL construction
+	apiURL, err := url.JoinPath(c.config.BaseURL, "api", "v2", "images")
+	if err != nil {
+		return "", fmt.Errorf("building API URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("executing request: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	// 201 Created is the expected response
+	if resp.StatusCode == http.StatusCreated {
+		// Return a composite ID for tracking (registry/image@digest)
+		return fmt.Sprintf("%s/%s", registry, imageWithDigest), nil
+	}
+
+	// Read response body for error details
+	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return "", fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(respBodyBytes))
 }

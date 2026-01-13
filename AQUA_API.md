@@ -437,89 +437,129 @@ Removes all finished and failed jobs from the queue.
 
 ---
 
-## Images API (v2)
+## Images API (v2) - **Currently Used by Controller**
 
-More advanced APIs for image management.
+The controller uses the v2 Images API for triggering scans and checking scan status. This approach uses digest-based references for more reliable and repeatable scanning.
 
-### 1. Get Image Information
+### 1. Trigger Image Scan (Register Image)
 
-Retrieves comprehensive information about a specific image.
+Triggers a scan for a specified image by registering it with Aqua.
 
-**Endpoint**: `GET /images/{registry}/{repository}/{tag}`
-
-**Authentication**: Bearer token
-
-**Path Parameters**:
-- `registry` (string, required): Registry name (max 255 chars)
-- `repository` (string, required): Repository name (max 255 chars)
-- `tag` (string, required): Tag name (max 255 chars)
-
-**Response**: Detailed image metadata including:
-- Scan status
-- Vulnerabilities by severity
-- Image layers
-- OS information
-- Compliance status
-
-### 2. List Registered Images
-
-Lists all images registered in Aqua.
-
-**Endpoint**: `GET /v2/images`
-
-**Authentication**: Bearer token
-
-**Query Parameters**: Supports filtering and pagination
-
-### 3. Register Image
-
-Registers an image for scanning.
-
-**Endpoint**: `POST /v2/images`
+**Endpoint**: `POST /api/v2/images`
 
 **Authentication**: Bearer token
 
 **Request Body**:
 ```json
 {
-  "registry": "Docker Hub",
-  "repository": "library/nginx",
-  "tag": "latest"
+  "registry": "example-registry",
+  "image": "richardmsong/jfrog-token-exchanger@sha256:abc123..."
 }
 ```
 
-### 4. List Image Vulnerabilities
+**Fields**:
+- `registry` (string, required): The Aqua registry name (configured in Aqua console)
+- `image` (string, required): Image reference with digest in format `repository@sha256:...`
 
-Retrieves vulnerability list for a specific image.
+**Response Codes**:
+- `201 Created`: Image registered and scan triggered successfully
+- `400 Bad Request`: Invalid request parameters
+- `401 Unauthorized`: Invalid or expired token
+
+**Example Request**:
+```bash
+curl -X POST \
+  "https://api.aquasec.com/api/v2/images" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "registry": "my-registry",
+    "image": "myapp/backend@sha256:a1b2c3d4e5f6..."
+  }'
+```
+
+### 2. Get Image Scan Results
+
+Retrieves scan status for a specific image by digest.
+
+**Endpoint**: `GET /api/v2/images/{registry}/{image}/{tag}`
+
+**Authentication**: Bearer token
+
+**Path Parameters**:
+- `registry` (string, required): The Aqua registry name
+- `image` (string, required): Repository/image name (URL-encoded)
+- `tag` (string, required): Use `@sha256:...` as the tag for digest-based lookup
+
+**Example URL**:
+```
+GET /api/v2/images/example-registry/richardmsong/jfrog-token-exchanger/@sha256:abc123...
+```
+
+**Response Codes**:
+- `200 OK`: Image found and scanned - **PASS**
+- `404 Not Found`: Image not yet scanned - **trigger scan**
+- `401 Unauthorized`: Invalid or expired token
+
+**Key Behavior**:
+- Any non-404 response indicates the image has been scanned
+- The controller does NOT evaluate vulnerability counts - Aqua Enforcer handles enforcement
+- This provides a simpler, more reliable integration model
+
+**Example Request**:
+```bash
+curl -X GET \
+  "https://api.aquasec.com/api/v2/images/my-registry/myapp%2Fbackend/%40sha256%3Aa1b2c3d4e5f6..." \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Accept: application/json"
+```
+
+### Why Digest-Based Scanning?
+
+Using image digests (`@sha256:...`) instead of tags provides:
+1. **Immutability**: Tags can be reused/overwritten, digests cannot
+2. **Repeatability**: Same digest always refers to the same image content
+3. **Reliability**: Avoids issues with Aqua's handling of mutable tags
+4. **Auditability**: Clear record of exactly which image version was scanned
+
+### Legacy v2 Endpoints (For Reference)
+
+The following endpoints are available but not used by the controller:
+
+#### Get Image Information
+
+**Endpoint**: `GET /images/{registry}/{repository}/{tag}`
+
+**Response**: Detailed image metadata including vulnerabilities, layers, OS info
+
+#### List Image Vulnerabilities
 
 **Endpoint**: `GET /v2/images/{registry}/{repository}/{tag}/vulnerabilities`
 
-**Authentication**: Bearer token
+**Response**: Detailed CVE information
 
-**Response**: Detailed CVE information with:
-- CVE ID
-- CVSS score
-- Severity
-- Fix availability
-- Package information
-
-### 5. Get Image Scan History
-
-Retrieves historical scan records for an image.
+#### Get Image Scan History
 
 **Endpoint**: `GET /v2/images/{registry}/{repository}/{tag}/scan_history`
 
-**Authentication**: Bearer token
-
-**Response**: Array of scan events with timestamps and results
+**Response**: Array of scan events with timestamps
 
 ---
 
 ## Implementation Guide
 
-### Workflow for Aqua Scan Gate Controller
+### Workflow for Aqua Scan Gate Controller (v2 API)
 
-Here's the recommended implementation flow for the controller:
+The controller uses a simplified workflow with the v2 API:
+
+1. **Check if image exists**: `GET /api/v2/images/{registry}/{image}/@sha256:...`
+2. **If 404**: Trigger scan with `POST /api/v2/images`
+3. **If not 404**: Image is scanned, allow pod scheduling
+4. **Requeue**: Poll until image appears in Aqua
+
+This approach delegates enforcement decisions to Aqua Enforcer.
+
+### Legacy Workflow (v1 API Reference)
 
 #### 1. Initialize Aqua Client
 
@@ -920,6 +960,11 @@ Always verify against your specific Aqua deployment version.
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2024-01-09
+**Document Version**: 2.0
+**Last Updated**: 2026-01-12
 **Author**: Claude Code (AI Assistant)
+
+### Changelog
+
+- **v2.0** (2026-01-12): Updated to use v2 API with digest-based scanning. Simplified scan pass/fail logic - now uses "not 404 = pass" approach, delegating enforcement to Aqua Enforcer.
+- **v1.0** (2024-01-09): Initial documentation with v1 API reference.

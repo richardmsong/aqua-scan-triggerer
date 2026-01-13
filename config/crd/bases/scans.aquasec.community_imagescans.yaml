@@ -149,11 +149,13 @@ spec:
                 description: Phase is the current phase of the scan
                 enum:
                 - Pending
-                - InProgress
-                - Passed
-                - Failed
+                - Registered
                 - Error
                 type: string
+              retryCount:
+                description: RetryCount tracks the number of consecutive errors for
+                  exponential backoff
+                type: integer
               vulnerabilities:
                 description: Vulnerabilities contains the summary of found vulnerabilities
                 properties:

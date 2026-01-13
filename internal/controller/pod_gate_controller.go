@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,8 +14,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
 )
@@ -33,6 +34,9 @@ const (
 
 	// LabelManagedBy identifies pods managed by this controller
 	LabelManagedBy = "scans.aquasec.community/managed-by"
+
+	// IndexFieldSchedulingGate is the field name for the scheduling gate index
+	IndexFieldSchedulingGate = "spec.schedulingGates.name"
 )
 
 // PodGateReconciler reconciles Pods with our scheduling gate
@@ -138,16 +142,17 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		// Check scan status
 		switch imageScan.Status.Phase {
-		case securityv1alpha1.ScanPhasePassed:
+		case securityv1alpha1.ScanPhaseRegistered:
 			// Good, continue checking other images
 			continue
-		case securityv1alpha1.ScanPhaseFailed:
-			// Scan failed - don't remove gate, emit event
+		case securityv1alpha1.ScanPhaseError:
+			// Error occurred - don't remove gate, emit event
 			if r.Recorder != nil {
-				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanFailed",
-					"Image %s failed security scan: %s", img.image, imageScan.Status.Message)
+				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ScanError",
+					"Image %s scan error: %s", img.image, imageScan.Status.Message)
 			}
 			allPassed = false
+			pendingImages = append(pendingImages, img.image)
 		default:
 			// Still pending
 			allPassed = false
@@ -172,8 +177,8 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			"Waiting for scan to complete for: %s", strings.Join(pendingImages, ", "))
 	}
 
-	// Requeue to check again
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// No requeue needed - ImageScan watch will trigger reconciliation
+	return ctrl.Result{}, nil
 }
 
 type imageRef struct {
@@ -250,6 +255,26 @@ func hashString(s string) string {
 }
 
 func (r *PodGateReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Set up field indexer for efficient pod listing by scheduling gate
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&corev1.Pod{},
+		IndexFieldSchedulingGate,
+		func(obj client.Object) []string {
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				return nil
+			}
+			var gates []string
+			for _, gate := range pod.Spec.SchedulingGates {
+				gates = append(gates, gate.Name)
+			}
+			return gates
+		},
+	); err != nil {
+		return fmt.Errorf("failed to set up field indexer: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
 		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
@@ -260,5 +285,70 @@ func (r *PodGateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// Only reconcile pods with our gate
 			return hasSchedulingGate(pod, SchedulingGateName)
 		})).
+		Watches(
+			&securityv1alpha1.ImageScan{},
+			handler.EnqueueRequestsFromMapFunc(r.mapImageScanToPods),
+		).
 		Complete(r)
+}
+
+// mapImageScanToPods maps ImageScan changes to pods that reference the same image.
+// This enables efficient event-driven reconciliation instead of polling.
+func (r *PodGateReconciler) mapImageScanToPods(ctx context.Context, obj client.Object) []reconcile.Request {
+	imageScan, ok := obj.(*securityv1alpha1.ImageScan)
+	if !ok {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	// Only trigger reconciliation for terminal states (Registered or Error)
+	if imageScan.Status.Phase != securityv1alpha1.ScanPhaseRegistered &&
+		imageScan.Status.Phase != securityv1alpha1.ScanPhaseError {
+		return nil
+	}
+
+	// List only pods with our scheduling gate using the field indexer
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList, client.MatchingFields{
+		IndexFieldSchedulingGate: SchedulingGateName,
+	}); err != nil {
+		logger.Error(err, "Failed to list pods for ImageScan mapping")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, pod := range podList.Items {
+		// Skip excluded namespaces
+		if r.ExcludedNamespaces[pod.Namespace] {
+			continue
+		}
+
+		// Check if this pod references the image from this ImageScan
+		images := extractImages(&pod)
+		for _, img := range images {
+			scanName := imageScanName(img)
+			scanNamespace := r.ScanNamespace
+			if scanNamespace == "" {
+				scanNamespace = pod.Namespace
+			}
+
+			// Match by name and namespace
+			if scanName == imageScan.Name && scanNamespace == imageScan.Namespace {
+				logger.V(1).Info("Mapping ImageScan to pod",
+					"imageScan", imageScan.Name,
+					"pod", pod.Name,
+					"namespace", pod.Namespace)
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      pod.Name,
+						Namespace: pod.Namespace,
+					},
+				})
+				break // Pod already added, no need to check other images
+			}
+		}
+	}
+
+	return requests
 }

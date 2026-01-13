@@ -21,14 +21,12 @@ type ImageScanSpec struct {
 }
 
 // ScanPhase represents the current phase of the scan
-// +kubebuilder:validation:Enum=Pending;InProgress;Passed;Failed;Error
+// +kubebuilder:validation:Enum=Pending;Registered;Error
 type ScanPhase string
 
 const (
 	ScanPhasePending    ScanPhase = "Pending"
-	ScanPhaseInProgress ScanPhase = "InProgress"
-	ScanPhasePassed     ScanPhase = "Passed"
-	ScanPhaseFailed     ScanPhase = "Failed"
+	ScanPhaseRegistered ScanPhase = "Registered"
 	ScanPhaseError      ScanPhase = "Error"
 )
 
@@ -70,6 +68,10 @@ type ImageScanStatus struct {
 	// Conditions represent the latest available observations
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// RetryCount tracks the number of consecutive errors for exponential backoff
+	// +optional
+	RetryCount int `json:"retryCount,omitempty"`
 }
 
 // +kubebuilder:object:root=true
