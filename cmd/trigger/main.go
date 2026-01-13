@@ -292,10 +292,6 @@ func extractImagesFromDocument(doc []byte, verbose bool) ([]imageref.ImageRef, e
 		return nil, nil
 	}
 
-	if podSpec == nil {
-		return nil, nil
-	}
-
 	return imageref.ExtractFromPodSpec(podSpec), nil
 }
 
