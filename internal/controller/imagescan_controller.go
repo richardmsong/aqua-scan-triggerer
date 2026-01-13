@@ -14,6 +14,24 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	baseBackoff = 30 * time.Second
+	maxBackoff  = 10 * time.Minute
+)
+
+// calculateBackoff returns an exponential backoff duration based on retry count.
+// It uses multiplication (doubling) for clarity and caps at maxBackoff.
+func calculateBackoff(retryCount int) time.Duration {
+	backoff := baseBackoff
+	for i := 0; i < retryCount && backoff < maxBackoff; i++ {
+		backoff *= 2
+	}
+	if backoff > maxBackoff {
+		backoff = maxBackoff
+	}
+	return backoff
+}
+
 // ImageScanReconciler reconciles a ImageScan object
 type ImageScanReconciler struct {
 	client.Client
@@ -54,11 +72,11 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		logger.Error(err, "Failed to get scan result from Aqua")
 		imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
 		imageScan.Status.Message = err.Error()
+		imageScan.Status.RetryCount++
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 			logger.Error(updateErr, "Failed to update ImageScan status")
 		}
-		// Error state is terminal - don't requeue
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: calculateBackoff(imageScan.Status.RetryCount)}, nil
 	}
 
 	switch result.Status {
@@ -70,15 +88,16 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			logger.Error(err, "Failed to trigger scan")
 			imageScan.Status.Phase = securityv1alpha1.ScanPhaseError
 			imageScan.Status.Message = err.Error()
+			imageScan.Status.RetryCount++
 			if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
-			// Error state is terminal - don't requeue
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: calculateBackoff(imageScan.Status.RetryCount)}, nil
 		}
 		imageScan.Status.Phase = securityv1alpha1.ScanPhasePending
 		imageScan.Status.AquaScanID = scanID
 		imageScan.Status.Message = "Scan triggered, waiting for Aqua to process"
+		imageScan.Status.RetryCount = 0 // Reset retry count on success
 		if updateErr := r.Status().Update(ctx, &imageScan); updateErr != nil {
 			return ctrl.Result{}, updateErr
 		}
@@ -93,6 +112,7 @@ func (r *ImageScanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		imageScan.Status.CompletedTime = &now
 		imageScan.Status.Phase = securityv1alpha1.ScanPhaseRegistered
 		imageScan.Status.Message = "Image registered in Aqua"
+		imageScan.Status.RetryCount = 0 // Reset retry count on success
 
 		logger.Info("Image registered in Aqua",
 			"image", imageScan.Spec.Image,
