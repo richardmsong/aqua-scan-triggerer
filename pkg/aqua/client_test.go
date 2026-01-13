@@ -777,25 +777,25 @@ var _ = Describe("Registry Mirror Functions", func() {
 				}
 			})
 
-			It("should map docker.io to its mirror with path prefix", func() {
+			It("should map docker.io to full mirror URL as prefix (image name unchanged)", func() {
 				registry, imageName := applyMirrorMapping("docker.io", "library/nginx", mirrors)
-				Expect(registry).To(Equal("artifactory.internal.com"))
-				Expect(imageName).To(Equal("docker-remote/library/nginx"))
+				Expect(registry).To(Equal("artifactory.internal.com/docker-remote"))
+				Expect(imageName).To(Equal("library/nginx"))
 			})
 
 			It("should handle index.docker.io as docker.io", func() {
 				registry, imageName := applyMirrorMapping("index.docker.io", "myuser/myimage", mirrors)
-				Expect(registry).To(Equal("artifactory.internal.com"))
-				Expect(imageName).To(Equal("docker-remote/myuser/myimage"))
+				Expect(registry).To(Equal("artifactory.internal.com/docker-remote"))
+				Expect(imageName).To(Equal("myuser/myimage"))
 			})
 
-			It("should map gcr.io to its mirror with path prefix", func() {
+			It("should map gcr.io to full mirror URL as prefix (image name unchanged)", func() {
 				registry, imageName := applyMirrorMapping("gcr.io", "my-project/my-image", mirrors)
-				Expect(registry).To(Equal("artifactory.internal.com"))
-				Expect(imageName).To(Equal("gcr-remote/my-project/my-image"))
+				Expect(registry).To(Equal("artifactory.internal.com/gcr-remote"))
+				Expect(imageName).To(Equal("my-project/my-image"))
 			})
 
-			It("should map ghcr.io to its mirror without path prefix", func() {
+			It("should map ghcr.io to its mirror without path", func() {
 				registry, imageName := applyMirrorMapping("ghcr.io", "myorg/myimage", mirrors)
 				Expect(registry).To(Equal("harbor.internal.com"))
 				Expect(imageName).To(Equal("myorg/myimage"))
@@ -834,27 +834,27 @@ var _ = Describe("Registry Mirror Functions", func() {
 				}
 			})
 
-			It("should apply mirror mapping for Docker Hub image", func() {
+			It("should apply mirror mapping for Docker Hub image (full mirror URL as registry, image unchanged)", func() {
 				registry, imageName, tag, err := parseImageReferenceWithMirrors(
 					"nginx:latest",
 					"sha256:abc123",
 					mirrors,
 				)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registry).To(Equal("artifactory.internal.com"))
-				Expect(imageName).To(Equal("docker-remote/library/nginx"))
+				Expect(registry).To(Equal("artifactory.internal.com/docker-remote"))
+				Expect(imageName).To(Equal("library/nginx"))
 				Expect(tag).To(Equal("@sha256:abc123"))
 			})
 
-			It("should apply mirror mapping for ghcr.io image", func() {
+			It("should apply mirror mapping for ghcr.io image (full mirror URL as registry, image unchanged)", func() {
 				registry, imageName, tag, err := parseImageReferenceWithMirrors(
 					"ghcr.io/myorg/myimage:v1.0",
 					"sha256:def456",
 					mirrors,
 				)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registry).To(Equal("harbor.internal.com"))
-				Expect(imageName).To(Equal("ghcr/myorg/myimage"))
+				Expect(registry).To(Equal("harbor.internal.com/ghcr"))
+				Expect(imageName).To(Equal("myorg/myimage"))
 				Expect(tag).To(Equal("@sha256:def456"))
 			})
 
@@ -888,7 +888,7 @@ var _ = Describe("Client with Registry Mirrors", func() {
 	Context("when registry mirrors are configured", func() {
 		BeforeEach(func() {
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Check that the registry lookup uses the mirrored registry
+				// Check that the registry lookup uses the full mirrored registry path as prefix
 				if r.URL.Path == "/api/v2/registries" {
 					resp := RegistriesResponse{
 						Count:    1,
@@ -896,9 +896,10 @@ var _ = Describe("Client with Registry Mirrors", func() {
 						PageSize: 100,
 						Result: []Registry{
 							{
-								Name:     "artifactory-docker",
-								Type:     "docker",
-								Prefixes: []string{"artifactory.internal.com"},
+								Name: "artifactory-docker",
+								Type: "docker",
+								// The Aqua registry has the full mirror path as its prefix
+								Prefixes: []string{"artifactory.internal.com/docker-remote"},
 							},
 						},
 					}
@@ -907,11 +908,12 @@ var _ = Describe("Client with Registry Mirrors", func() {
 					return
 				}
 
-				// For GetScanResult - verify the mirrored image path is used
+				// For GetScanResult - verify the correct registry is used with unchanged image name
 				if r.Method == "GET" && strings.Contains(r.URL.Path, "/api/v2/images/") {
-					// Should be looking up artifactory-docker registry with mirrored path
+					// Should be looking up artifactory-docker registry with original image path (library/nginx)
 					Expect(r.URL.Path).To(ContainSubstring("artifactory-docker"))
-					Expect(r.URL.Path).To(ContainSubstring("docker-remote"))
+					Expect(r.URL.Path).To(ContainSubstring("library/nginx"))
+					// Should NOT contain docker-remote in the image path
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte(`{"name": "test-image"}`))
 					return
@@ -922,7 +924,9 @@ var _ = Describe("Client with Registry Mirrors", func() {
 					var reqBody triggerScanRequest
 					_ = json.NewDecoder(r.Body).Decode(&reqBody)
 					Expect(reqBody.Registry).To(Equal("artifactory-docker"))
-					Expect(reqBody.Image).To(ContainSubstring("docker-remote/library/nginx"))
+					// Image name should be library/nginx (unchanged), not docker-remote/library/nginx
+					Expect(reqBody.Image).To(ContainSubstring("library/nginx"))
+					Expect(reqBody.Image).NotTo(ContainSubstring("docker-remote/library/nginx"))
 					w.WriteHeader(http.StatusCreated)
 					return
 				}

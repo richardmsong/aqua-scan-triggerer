@@ -138,10 +138,11 @@ func NewClient(config Config) Client {
 }
 
 // applyMirrorMapping checks if the container registry has a mirror configured
-// and returns the mirrored registry if found. It also adjusts the image name
-// to include any path prefix from the mirror.
+// and returns the mirrored registry prefix for Aqua lookup.
+// The full mirror URL (including any path) is used as the registry prefix to search for in Aqua.
 // For example, if docker.io is mirrored to artifactory.internal.com/docker-remote,
-// an image "library/nginx" becomes "docker-remote/library/nginx" on "artifactory.internal.com".
+// the Aqua registry should have prefix "artifactory.internal.com/docker-remote".
+// The image name is NOT modified - it stays as "library/nginx".
 func applyMirrorMapping(containerRegistry, imageName string, mirrors []RegistryMirror) (mirroredRegistry, mirroredImageName string) {
 	// Normalize for comparison (handle docker.io vs index.docker.io)
 	normalizedRegistry := normalizeRegistryName(containerRegistry)
@@ -149,14 +150,12 @@ func applyMirrorMapping(containerRegistry, imageName string, mirrors []RegistryM
 	for _, mirror := range mirrors {
 		normalizedSource := normalizeRegistryName(mirror.Source)
 		if normalizedRegistry == normalizedSource {
-			// Parse the mirror to extract host and path prefix
-			mirrorHost, mirrorPath := parseMirrorURL(mirror.Mirror)
-
-			// If mirror has a path prefix, prepend it to the image name
-			if mirrorPath != "" {
-				return mirrorHost, mirrorPath + "/" + imageName
-			}
-			return mirrorHost, imageName
+			// Return the full mirror URL as the registry prefix for Aqua lookup
+			// The image name stays unchanged
+			mirrorValue := strings.TrimPrefix(mirror.Mirror, "https://")
+			mirrorValue = strings.TrimPrefix(mirrorValue, "http://")
+			mirrorValue = strings.TrimSuffix(mirrorValue, "/")
+			return mirrorValue, imageName
 		}
 	}
 
