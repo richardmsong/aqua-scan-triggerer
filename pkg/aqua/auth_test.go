@@ -79,7 +79,8 @@ var _ = Describe("TokenManager", func() {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(resp)
+					err = json.NewEncoder(w).Encode(resp)
+					Expect(err).NotTo(HaveOccurred())
 				}))
 			})
 
@@ -105,7 +106,7 @@ var _ = Describe("TokenManager", func() {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(resp)
+					_ = json.NewEncoder(w).Encode(resp)
 				})
 
 				tm := NewTokenManager(server.URL, AuthConfig{
@@ -130,7 +131,7 @@ var _ = Describe("TokenManager", func() {
 			BeforeEach(func() {
 				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusUnauthorized)
-					w.Write([]byte(`{"error": "invalid credentials"}`))
+					_, _ = w.Write([]byte(`{"error": "invalid credentials"}`))
 				}))
 			})
 
@@ -159,7 +160,7 @@ var _ = Describe("TokenManager", func() {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(resp)
+					_ = json.NewEncoder(w).Encode(resp)
 				}))
 
 				tm := NewTokenManager(server.URL, AuthConfig{
@@ -198,7 +199,7 @@ var _ = Describe("TokenManager", func() {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					json.NewEncoder(w).Encode(resp)
+					_ = json.NewEncoder(w).Encode(resp)
 				}))
 
 				tm := NewTokenManager(server.URL, AuthConfig{
@@ -282,8 +283,10 @@ var _ = Describe("HMAC256 Signing", func() {
 			req1, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)
 			req2, _ := http.NewRequest("POST", "https://api.aquasec.com/test", nil)
 
-			tm.SignRequest(req1, []byte(`{"foo":"bar"}`))
-			tm.SignRequest(req2, []byte(`{"foo":"baz"}`))
+			err := tm.SignRequest(req1, []byte(`{"foo":"bar"}`))
+			Expect(err).NotTo(HaveOccurred())
+			err = tm.SignRequest(req2, []byte(`{"foo":"baz"}`))
+			Expect(err).NotTo(HaveOccurred())
 
 			// Different bodies should produce different signatures
 			// (though timestamps might also differ, making them different anyway)
