@@ -203,7 +203,10 @@ func run(ctx context.Context, cfg *Config, input io.Reader) error {
 	}
 
 	// Create image resolver for resolving tags to digests (linux/amd64)
-	resolver := imageref.NewResolver()
+	// Uses DefaultRemoteOptions which includes authentication for:
+	// - Docker config.json credentials
+	// - Azure Container Registry (ACR) via environment variables or MSI
+	resolver := imageref.NewResolver(imageref.DefaultRemoteOptions()...)
 
 	// Resolve digests for images that don't have them
 	var resolvedImages []imageref.ImageRef
