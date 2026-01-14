@@ -24,6 +24,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/richardmsong/aqua-scan-triggerer/pkg/aqua"
 	"github.com/richardmsong/aqua-scan-triggerer/pkg/imageref"
 	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
@@ -203,7 +205,8 @@ func run(ctx context.Context, cfg *Config, input io.Reader) error {
 	}
 
 	// Create image resolver for resolving tags to digests (linux/amd64)
-	resolver := imageref.NewResolver()
+	// Use DefaultKeychain to inherit credentials from Docker config (e.g., from az acr login)
+	resolver := imageref.NewResolver(remote.WithAuthFromKeychain(authn.DefaultKeychain))
 
 	// Resolve digests for images that don't have them
 	var resolvedImages []imageref.ImageRef
