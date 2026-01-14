@@ -78,10 +78,10 @@ func main() {
 	flag.BoolVar(&tracingInsecure, "tracing-insecure", true, "Use insecure connection for tracing")
 
 	// Bind tracing flags to viper for environment variable support
-	viper.BindEnv("tracing-endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
-	viper.BindEnv("tracing-protocol", "OTEL_EXPORTER_OTLP_PROTOCOL")
-	viper.BindEnv("tracing-sample-ratio", "OTEL_TRACES_SAMPLER_ARG")
-	viper.BindEnv("tracing-insecure", "OTEL_EXPORTER_OTLP_INSECURE")
+	_ = viper.BindEnv("tracing-endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
+	_ = viper.BindEnv("tracing-protocol", "OTEL_EXPORTER_OTLP_PROTOCOL")
+	_ = viper.BindEnv("tracing-sample-ratio", "OTEL_TRACES_SAMPLER_ARG")
+	_ = viper.BindEnv("tracing-insecure", "OTEL_EXPORTER_OTLP_INSECURE")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
