@@ -125,8 +125,6 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				tracing.AttrImageDigest.String(img.Digest),
 			),
 		)
-		// Use imageCtx for operations within this loop iteration to maintain span hierarchy
-		_ = imageCtx // Available for use by API calls to maintain trace hierarchy
 
 		scanName := imageref.ScanName(img)
 		scanNamespace := r.ScanNamespace
@@ -135,7 +133,7 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		var imageScan securityv1alpha1.ImageScan
-		err := r.Get(ctx, types.NamespacedName{
+		err := r.Get(imageCtx, types.NamespacedName{
 			Name:      scanName,
 			Namespace: scanNamespace,
 		}, &imageScan)
@@ -157,7 +155,7 @@ func (r *PodGateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 					Digest: img.Digest,
 				},
 			}
-			if err := r.Create(ctx, &imageScan); err != nil {
+			if err := r.Create(imageCtx, &imageScan); err != nil {
 				if !apierrors.IsAlreadyExists(err) {
 					imageSpan.RecordError(err)
 					imageSpan.SetStatus(codes.Error, "Failed to create ImageScan")
