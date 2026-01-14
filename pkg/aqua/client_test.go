@@ -3,8 +3,10 @@ package aqua
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -12,10 +14,27 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// testCacheDir is a test-specific cache directory to avoid conflicts with other processes
+var testCacheDir string
+
 func TestAquaClient(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Aqua Client Suite")
 }
+
+var _ = BeforeSuite(func() {
+	// Use a test-specific cache directory to avoid conflicts with other tests
+	// or processes that might be using the default cache directory
+	testCacheDir = fmt.Sprintf("%s/aqua-cache-test-%d", os.TempDir(), os.Getpid())
+	_ = os.RemoveAll(testCacheDir)
+})
+
+var _ = AfterSuite(func() {
+	// Clean up test cache directory
+	if testCacheDir != "" {
+		_ = os.RemoveAll(testCacheDir)
+	}
+})
 
 // createMockServerWithToken creates a test server that handles both token requests and custom handlers
 func createMockServerWithToken(bearerToken string, apiHandler http.HandlerFunc) *httptest.Server {
@@ -428,8 +447,10 @@ var _ = Describe("GetRegistries", func() {
 				_ = json.NewEncoder(w).Encode(resp)
 			})
 
+			fileCacheEnabled := false
 			client = NewClient(Config{
-				BaseURL: server.URL,
+				BaseURL:          server.URL,
+				FileCacheEnabled: &fileCacheEnabled,
 				Auth: AuthConfig{
 					APIKey:     "test-api-key",
 					HMACSecret: "test-secret",
@@ -455,8 +476,10 @@ var _ = Describe("GetRegistries", func() {
 				_, _ = w.Write([]byte(`{"error": "database error"}`))
 			})
 
+			fileCacheEnabled := false
 			client = NewClient(Config{
-				BaseURL: server.URL,
+				BaseURL:          server.URL,
+				FileCacheEnabled: &fileCacheEnabled,
 				Auth: AuthConfig{
 					APIKey:     "test-api-key",
 					HMACSecret: "test-secret",
@@ -658,9 +681,11 @@ var _ = Describe("Registry Caching", func() {
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
 
+			fileCacheEnabled := false
 			client = NewClient(Config{
-				BaseURL:  server.URL,
-				CacheTTL: 1 * time.Hour,
+				BaseURL:          server.URL,
+				CacheTTL:         1 * time.Hour,
+				FileCacheEnabled: &fileCacheEnabled,
 				Auth: AuthConfig{
 					APIKey:     "test-api-key",
 					HMACSecret: "test-secret",
@@ -724,9 +749,11 @@ var _ = Describe("Registry Caching", func() {
 			}))
 
 			// Use a very short TTL for testing expiration
+			fileCacheEnabled := false
 			client = NewClient(Config{
-				BaseURL:  server.URL,
-				CacheTTL: 1 * time.Millisecond,
+				BaseURL:          server.URL,
+				CacheTTL:         1 * time.Millisecond,
+				FileCacheEnabled: &fileCacheEnabled,
 				Auth: AuthConfig{
 					APIKey:     "test-api-key",
 					HMACSecret: "test-secret",
@@ -789,9 +816,11 @@ var _ = Describe("Registry Caching", func() {
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
 
+			fileCacheEnabled := false
 			client = NewClient(Config{
-				BaseURL:  server.URL,
-				CacheTTL: 1 * time.Hour,
+				BaseURL:          server.URL,
+				CacheTTL:         1 * time.Hour,
+				FileCacheEnabled: &fileCacheEnabled,
 				Auth: AuthConfig{
 					APIKey:     "test-api-key",
 					HMACSecret: "test-secret",

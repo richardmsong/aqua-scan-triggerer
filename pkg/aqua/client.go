@@ -111,6 +111,14 @@ type Config struct {
 
 	// Verbose enables debug logging for authentication
 	Verbose bool
+
+	// FileCacheEnabled enables persistent file-based caching of registries
+	// Default: true
+	FileCacheEnabled *bool
+
+	// FileCacheDir is the directory for the cache file
+	// Default: /tmp/aqua-scan-triggerer
+	FileCacheDir string
 }
 
 // registryCache holds cached registry data with timestamp
@@ -124,9 +132,12 @@ type aquaClient struct {
 	httpClient   *http.Client
 	tokenManager *TokenManager
 
-	// Cache for registries
+	// In-memory cache for registries
 	cacheMu sync.RWMutex
 	cache   *registryCache
+
+	// File-based cache for persistent storage
+	fileCache *FileCache
 }
 
 // NewClient creates a new Aqua client
@@ -149,10 +160,23 @@ func NewClient(config Config) Client {
 
 	tokenManager := NewTokenManager(config.BaseURL, config.Auth, httpClient, config.Verbose)
 
+	// Initialize file cache
+	fileCacheEnabled := true
+	if config.FileCacheEnabled != nil {
+		fileCacheEnabled = *config.FileCacheEnabled
+	}
+
+	fileCache := NewFileCache(FileCacheConfig{
+		CacheDir: config.FileCacheDir,
+		TTL:      config.CacheTTL,
+		Enabled:  fileCacheEnabled,
+	})
+
 	return &aquaClient{
 		config:       config,
 		httpClient:   httpClient,
 		tokenManager: tokenManager,
+		fileCache:    fileCache,
 	}
 }
 
@@ -512,7 +536,23 @@ func (c *aquaClient) GetRegistries(ctx context.Context) ([]Registry, error) {
 	}
 	c.cacheMu.RUnlock()
 
-	span.SetAttributes(attribute.Bool("cache_hit", false))
+	// In-memory cache miss or expired, check file cache
+	if c.fileCache != nil {
+		result, err := c.fileCache.Get()
+		if err == nil && result != nil {
+			// File cache hit - populate in-memory cache with original timestamp
+			// This ensures the hourly refresh logic works correctly
+			c.cacheMu.Lock()
+			c.cache = &registryCache{
+				registries: result.Registries,
+				fetchedAt:  result.FetchedAt,
+			}
+			c.cacheMu.Unlock()
+			return result.Registries, nil
+		}
+		// File cache miss or error, continue to fetch from API
+	}
+  span.SetAttributes(attribute.Bool("cache_hit", false))
 	// Cache miss or expired, fetch from API
 	return c.fetchRegistries(ctx)
 }
@@ -590,6 +630,13 @@ func (c *aquaClient) fetchRegistries(ctx context.Context) ([]Registry, error) {
 		fetchedAt:  time.Now(),
 	}
 	c.cacheMu.Unlock()
+
+	// Update file cache (non-blocking, log errors in verbose mode as file cache is optional)
+	if c.fileCache != nil {
+		if err := c.fileCache.Set(registriesResp.Result); err != nil && c.config.Verbose {
+			fmt.Printf("Warning: failed to update file cache: %v\n", err)
+		}
+	}
 
 	return registriesResp.Result, nil
 }
