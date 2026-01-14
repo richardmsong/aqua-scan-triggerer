@@ -459,16 +459,17 @@ func (c *aquaClient) GetRegistries(ctx context.Context) ([]Registry, error) {
 
 	// In-memory cache miss or expired, check file cache
 	if c.fileCache != nil {
-		registries, err := c.fileCache.Get()
-		if err == nil && registries != nil {
-			// File cache hit - populate in-memory cache
+		result, err := c.fileCache.Get()
+		if err == nil && result != nil {
+			// File cache hit - populate in-memory cache with original timestamp
+			// This ensures the hourly refresh logic works correctly
 			c.cacheMu.Lock()
 			c.cache = &registryCache{
-				registries: registries,
-				fetchedAt:  time.Now(),
+				registries: result.Registries,
+				fetchedAt:  result.FetchedAt,
 			}
 			c.cacheMu.Unlock()
-			return registries, nil
+			return result.Registries, nil
 		}
 		// File cache miss or error, continue to fetch from API
 	}

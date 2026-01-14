@@ -41,6 +41,12 @@ type fileCacheData struct {
 	Version    string     `json:"version"`
 }
 
+// FileCacheResult holds the result of a cache read operation
+type FileCacheResult struct {
+	Registries []Registry
+	FetchedAt  time.Time
+}
+
 // FileCache provides file-based caching for registry data
 type FileCache struct {
 	config FileCacheConfig
@@ -76,7 +82,8 @@ func (fc *FileCache) ensureCacheDir() error {
 
 // Get retrieves registries from the file cache if valid
 // Returns nil if cache is not present or expired
-func (fc *FileCache) Get() ([]Registry, error) {
+// The result includes the FetchedAt timestamp for proper TTL tracking
+func (fc *FileCache) Get() (*FileCacheResult, error) {
 	if !fc.config.Enabled {
 		return nil, nil
 	}
@@ -103,7 +110,10 @@ func (fc *FileCache) Get() ([]Registry, error) {
 		return nil, nil // Cache expired
 	}
 
-	return cacheData.Registries, nil
+	return &FileCacheResult{
+		Registries: cacheData.Registries,
+		FetchedAt:  cacheData.FetchedAt,
+	}, nil
 }
 
 // Set stores registries in the file cache

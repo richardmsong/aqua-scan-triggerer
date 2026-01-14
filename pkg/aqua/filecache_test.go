@@ -64,9 +64,9 @@ var _ = Describe("FileCache", func() {
 	Describe("Get", func() {
 		Context("when cache file does not exist", func() {
 			It("should return nil without error", func() {
-				registries, err := fc.Get()
+				result, err := fc.Get()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registries).To(BeNil())
+				Expect(result).To(BeNil())
 			})
 		})
 
@@ -83,13 +83,16 @@ var _ = Describe("FileCache", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("should return cached registries", func() {
-				registries, err := fc.Get()
+			It("should return cached registries with FetchedAt timestamp", func() {
+				result, err := fc.Get()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registries).To(HaveLen(1))
-				Expect(registries[0].Name).To(Equal("test-registry"))
-				Expect(registries[0].Type).To(Equal("docker"))
-				Expect(registries[0].Prefixes).To(ContainElement("docker.io"))
+				Expect(result).NotTo(BeNil())
+				Expect(result.Registries).To(HaveLen(1))
+				Expect(result.Registries[0].Name).To(Equal("test-registry"))
+				Expect(result.Registries[0].Type).To(Equal("docker"))
+				Expect(result.Registries[0].Prefixes).To(ContainElement("docker.io"))
+				// FetchedAt should be recent (within last minute)
+				Expect(time.Since(result.FetchedAt)).To(BeNumerically("<", 1*time.Minute))
 			})
 		})
 
@@ -113,9 +116,9 @@ var _ = Describe("FileCache", func() {
 			})
 
 			It("should return nil (cache miss)", func() {
-				registries, err := fc.Get()
+				result, err := fc.Get()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registries).To(BeNil())
+				Expect(result).To(BeNil())
 			})
 		})
 
@@ -129,9 +132,9 @@ var _ = Describe("FileCache", func() {
 			})
 
 			It("should return nil without error (treat as cache miss)", func() {
-				registries, err := fc.Get()
+				result, err := fc.Get()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registries).To(BeNil())
+				Expect(result).To(BeNil())
 			})
 		})
 
@@ -144,9 +147,9 @@ var _ = Describe("FileCache", func() {
 			})
 
 			It("should return nil", func() {
-				registries, err := fc.Get()
+				result, err := fc.Get()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(registries).To(BeNil())
+				Expect(result).To(BeNil())
 			})
 		})
 	})
@@ -195,11 +198,12 @@ var _ = Describe("FileCache", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify we can read it back
-			cachedRegistries, err := fc.Get()
+			result, err := fc.Get()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cachedRegistries).To(HaveLen(2))
-			Expect(cachedRegistries[0].Name).To(Equal("github-registry"))
-			Expect(cachedRegistries[1].Name).To(Equal("docker-hub"))
+			Expect(result).NotTo(BeNil())
+			Expect(result.Registries).To(HaveLen(2))
+			Expect(result.Registries[0].Name).To(Equal("github-registry"))
+			Expect(result.Registries[1].Name).To(Equal("docker-hub"))
 		})
 
 		Context("when file cache is disabled", func() {
@@ -360,9 +364,10 @@ var _ = Describe("FileCache", func() {
 			Expect(os.IsNotExist(err)).To(BeTrue())
 
 			// Verify cache file is complete
-			cachedRegistries, err := fc.Get()
+			result, err := fc.Get()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cachedRegistries).To(HaveLen(3))
+			Expect(result).NotTo(BeNil())
+			Expect(result.Registries).To(HaveLen(3))
 		})
 	})
 })
@@ -428,10 +433,11 @@ var _ = Describe("FileCache Integration with Client", func() {
 				TTL:      1 * time.Hour,
 				Enabled:  true,
 			})
-			cachedRegistries, err := fc.Get()
+			result, err := fc.Get()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cachedRegistries).To(HaveLen(1))
-			Expect(cachedRegistries[0].Name).To(Equal("github-registry"))
+			Expect(result).NotTo(BeNil())
+			Expect(result.Registries).To(HaveLen(1))
+			Expect(result.Registries[0].Name).To(Equal("github-registry"))
 		})
 	})
 
@@ -472,9 +478,58 @@ var _ = Describe("FileCache Integration with Client", func() {
 				CacheDir: cacheDir,
 				Enabled:  true,
 			})
-			cachedRegistries, err := fc.Get()
+			result, err := fc.Get()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cachedRegistries).To(BeNil())
+			Expect(result).To(BeNil())
+		})
+	})
+
+	Context("when file cache has FetchedAt timestamp", func() {
+		It("should preserve FetchedAt timestamp for TTL refresh", func() {
+			// Create a file cache with data that was fetched 30 minutes ago
+			fc := NewFileCache(FileCacheConfig{
+				CacheDir: cacheDir,
+				TTL:      1 * time.Hour,
+				Enabled:  true,
+			})
+
+			// Manually write cache data with a specific FetchedAt time (30 minutes ago)
+			pastTime := time.Now().Add(-30 * time.Minute)
+			cacheData := struct {
+				Registries []Registry `json:"registries"`
+				FetchedAt  time.Time  `json:"fetched_at"`
+				Version    string     `json:"version"`
+			}{
+				Registries: []Registry{
+					{
+						Name:     "cached-registry",
+						Type:     "docker",
+						Prefixes: []string{"docker.io"},
+					},
+				},
+				FetchedAt: pastTime,
+				Version:   "1",
+			}
+
+			// Write directly to the cache file
+			err := os.MkdirAll(cacheDir, 0755)
+			Expect(err).NotTo(HaveOccurred())
+			data, err := json.MarshalIndent(cacheData, "", "  ")
+			Expect(err).NotTo(HaveOccurred())
+			err = os.WriteFile(fc.GetCachePath(), data, 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that Get() returns the original FetchedAt timestamp
+			result, err := fc.Get()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(BeNil())
+			Expect(result.Registries).To(HaveLen(1))
+			Expect(result.Registries[0].Name).To(Equal("cached-registry"))
+
+			// FetchedAt should be approximately 30 minutes ago (within 1 minute tolerance)
+			timeDiff := time.Since(result.FetchedAt)
+			Expect(timeDiff).To(BeNumerically(">", 29*time.Minute))
+			Expect(timeDiff).To(BeNumerically("<", 31*time.Minute))
 		})
 	})
 })
