@@ -46,7 +46,6 @@ type Config struct {
 	Verbose         bool
 
 	// Tracing configuration
-	TracingEnabled     bool
 	TracingEndpoint    string
 	TracingProtocol    string
 	TracingSampleRatio float64
@@ -67,9 +66,8 @@ func main() {
 	flag.BoolVar(&cfg.DryRun, "dry-run", false, "Print images that would be scanned without triggering scans")
 	flag.BoolVar(&cfg.Verbose, "verbose", false, "Enable verbose output")
 
-	// Tracing flags
-	flag.BoolVar(&cfg.TracingEnabled, "tracing-enabled", getEnvBool("OTEL_TRACING_ENABLED", false), "Enable OpenTelemetry tracing (or OTEL_TRACING_ENABLED env var)")
-	flag.StringVar(&cfg.TracingEndpoint, "tracing-endpoint", getEnvString("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"), "OTLP collector endpoint (or OTEL_EXPORTER_OTLP_ENDPOINT env var)")
+	// Tracing flags - tracing is enabled when endpoint is provided
+	flag.StringVar(&cfg.TracingEndpoint, "tracing-endpoint", getEnvString("OTEL_EXPORTER_OTLP_ENDPOINT", ""), "OTLP collector endpoint - enables tracing when set (or OTEL_EXPORTER_OTLP_ENDPOINT env var)")
 	flag.StringVar(&cfg.TracingProtocol, "tracing-protocol", getEnvString("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"), "OTLP protocol: grpc or http (or OTEL_EXPORTER_OTLP_PROTOCOL env var)")
 	flag.Float64Var(&cfg.TracingSampleRatio, "tracing-sample-ratio", getEnvFloat64("OTEL_TRACES_SAMPLER_ARG", 1.0), "Trace sampling ratio 0.0-1.0 (or OTEL_TRACES_SAMPLER_ARG env var)")
 	flag.BoolVar(&cfg.TracingInsecure, "tracing-insecure", getEnvBool("OTEL_EXPORTER_OTLP_INSECURE", true), "Disable TLS for tracing exporter (or OTEL_EXPORTER_OTLP_INSECURE env var)")
@@ -106,9 +104,8 @@ func main() {
 		cancel()
 	}()
 
-	// Set up tracing
+	// Set up tracing - enabled when endpoint is provided
 	tracingCfg := tracing.Config{
-		Enabled:        cfg.TracingEnabled,
 		Endpoint:       cfg.TracingEndpoint,
 		Protocol:       cfg.TracingProtocol,
 		ServiceName:    "aqua-trigger",

@@ -24,12 +24,10 @@ const (
 
 // Config holds the tracing configuration
 type Config struct {
-	// Enabled determines whether tracing is enabled
-	Enabled bool
-
 	// Endpoint is the OTLP collector endpoint
 	// For gRPC: "localhost:4317"
 	// For HTTP: "http://localhost:4318/v1/traces"
+	// If empty, tracing is disabled
 	Endpoint string
 
 	// Protocol specifies the OTLP protocol to use ("grpc" or "http")
@@ -52,14 +50,18 @@ type Config struct {
 // DefaultConfig returns a default tracing configuration
 func DefaultConfig() Config {
 	return Config{
-		Enabled:        false,
-		Endpoint:       "localhost:4317",
+		Endpoint:       "", // Empty means tracing disabled
 		Protocol:       "grpc",
 		ServiceName:    "aqua-scan-gate-controller",
 		ServiceVersion: "0.1.0",
 		SampleRatio:    1.0,
 		Insecure:       true,
 	}
+}
+
+// IsEnabled returns true if tracing is enabled (i.e., endpoint is configured)
+func (c Config) IsEnabled() bool {
+	return c.Endpoint != ""
 }
 
 // TracerProvider wraps the OpenTelemetry tracer provider and provides convenience methods
@@ -70,8 +72,9 @@ type TracerProvider struct {
 
 // Setup initializes the OpenTelemetry tracing with the given configuration.
 // It returns a TracerProvider that should be shut down when the application exits.
+// If the endpoint is empty, tracing is disabled and a no-op tracer is returned.
 func Setup(ctx context.Context, cfg Config) (*TracerProvider, error) {
-	if !cfg.Enabled {
+	if !cfg.IsEnabled() {
 		// Return a no-op tracer provider
 		return &TracerProvider{
 			tracer: otel.Tracer(TracerName),
