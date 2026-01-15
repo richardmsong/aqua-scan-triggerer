@@ -35,3 +35,5 @@ Thumbs.db
 # Playwright MCP temporary files
 .playwright-mcp/
 .claude/
+
+.env
