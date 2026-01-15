@@ -102,7 +102,7 @@ func (r *Resolver) ResolveDigest(ctx context.Context, imageRef string) (string, 
 
 // fetchIndex attempts to fetch the image as a multi-arch index and resolve the platform-specific digest.
 func (r *Resolver) fetchIndex(ctx context.Context, ref name.Reference, opts []remote.Option) (string, error) {
-	ctx, span := tracing.StartSpan(ctx, "imageref.fetchIndex",
+	_, span := tracing.StartSpan(ctx, "imageref.fetchIndex",
 		trace.WithAttributes(
 			semconv.HTTPRequestMethodGet,
 			attribute.String("registry", ref.Context().RegistryStr()),
@@ -132,7 +132,7 @@ func (r *Resolver) fetchIndex(ctx context.Context, ref name.Reference, opts []re
 
 // fetchImage fetches a single-arch image and returns its digest.
 func (r *Resolver) fetchImage(ctx context.Context, ref name.Reference, opts []remote.Option) (string, error) {
-	ctx, span := tracing.StartSpan(ctx, "imageref.fetchImage",
+	_, span := tracing.StartSpan(ctx, "imageref.fetchImage",
 		trace.WithAttributes(
 			semconv.HTTPRequestMethodGet,
 			attribute.String("registry", ref.Context().RegistryStr()),
