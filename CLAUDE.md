@@ -7,7 +7,7 @@ This repository contains a Kubernetes controller built with kubebuilder that imp
 ## Repository Structure
 
 ```
-aqua-scan-triggerer/
+aqua-scan-gate/
 ├── api/v1alpha1/              # Custom Resource Definitions
 │   ├── groupversion_info.go   # API group/version metadata
 │   └── imagescan_types.go     # ImageScan CRD definition
@@ -77,6 +77,7 @@ Provides abstraction over Aqua Security API:
 **File**: `internal/controller/imagescan_controller.go`
 
 Reconciles ImageScan resources by:
+
 1. Checking Aqua API for existing scan results
 2. Triggering scans for unscanned images
 3. Polling scan status until completion
@@ -90,12 +91,14 @@ Reconciles ImageScan resources by:
 **File**: `internal/controller/pod_gate_controller.go`
 
 Monitors pods with scheduling gates:
+
 1. Extracts all image references from pod spec
 2. Creates/checks ImageScan CRs for each image
 3. Removes gate when all scans pass
 4. Emits Kubernetes events for observability
 
 **Special Handling**:
+
 - Supports bypass annotation: `scans.aquasec.community/bypass-scan: "true"`
 - Respects excluded namespaces
 - Handles init containers, ephemeral containers
@@ -105,6 +108,7 @@ Monitors pods with scheduling gates:
 **File**: `internal/webhook/pod_webhook.go`
 
 Admission controller that:
+
 1. Intercepts pod creation requests
 2. Injects `scans.aquasec.community/aqua-scan` scheduling gate
 3. Skips excluded namespaces and images
@@ -115,6 +119,7 @@ Admission controller that:
 **File**: `cmd/main.go`
 
 Wires all components together:
+
 - Initializes controller-runtime manager
 - Registers all reconcilers
 - Configures webhook server
@@ -128,11 +133,13 @@ Wires all components together:
 Before working on this project, verify:
 
 1. **Go Installation**:
+
 ```bash
 go version  # Should be 1.24+
 ```
 
-2. **Kubebuilder Installation**:
+1. **Kubebuilder Installation**:
+
 ```bash
 # Install via go install
 go install sigs.k8s.io/kubebuilder/v4@latest
@@ -141,7 +148,8 @@ go install sigs.k8s.io/kubebuilder/v4@latest
 ~/go/bin/kubebuilder version
 ```
 
-3. **Kubernetes Cluster Access** (for testing):
+1. **Kubernetes Cluster Access** (for testing):
+
 ```bash
 kubectl version
 kubectl cluster-info
@@ -150,23 +158,27 @@ kubectl cluster-info
 ### Development Workflow
 
 1. **Install Dependencies**:
+
 ```bash
 go mod download
 make controller-gen
 ```
 
-2. **Generate Code**:
+1. **Generate Code**:
+
 ```bash
 # Generate DeepCopy methods and CRD manifests
 make manifests generate
 ```
 
-3. **Run Tests**:
+1. **Run Tests**:
+
 ```bash
 make test
 ```
 
-4. **Run Locally**:
+1. **Run Locally**:
+
 ```bash
 # Requires valid kubeconfig
 export AQUA_URL=https://your-aqua.com
@@ -174,13 +186,15 @@ export AQUA_API_KEY=your-key
 make run
 ```
 
-5. **Build Binary**:
+1. **Build Binary**:
+
 ```bash
 make build
 ./bin/manager --help
 ```
 
-6. **Build Container Image**:
+1. **Build Container Image**:
+
 ```bash
 make docker-build
 ```
@@ -197,6 +211,7 @@ make docker-build
 #### Modifying Security Policy
 
 Edit the switch statement in `internal/controller/imagescan_controller.go` around line 90:
+
 ```go
 // Determine pass/fail based on policy
 if result.Critical > 0 {
@@ -223,6 +238,7 @@ The client in `pkg/aqua/client.go` needs completion:
    - `GetScanStatus()`: GET scan results by ID
 
 3. **Example Implementation**:
+
 ```go
 func (c *aquaClient) TriggerScan(ctx context.Context, image, digest string) (string, error) {
     payload := map[string]string{
@@ -243,6 +259,7 @@ func (c *aquaClient) TriggerScan(ctx context.Context, image, digest string) (str
 Located in `internal/controller/pod_gate_controller_test.go`. Uses fake clients to test controller logic without real Kubernetes API.
 
 Run with:
+
 ```bash
 go test ./internal/controller/...
 ```
@@ -252,28 +269,33 @@ go test ./internal/controller/...
 Requires real Kubernetes cluster:
 
 1. Create kind cluster:
+
 ```bash
 kind create cluster --name aqua-test
 ```
 
-2. Install CRDs:
+1. Install CRDs:
+
 ```bash
 make install
 ```
 
-3. Run controller locally:
+1. Run controller locally:
+
 ```bash
 make run
 ```
 
-4. Create test pod:
+1. Create test pod:
+
 ```bash
 kubectl run test --image=nginx:latest
 kubectl get pod test -o yaml  # Check for scheduling gate
 kubectl get imagescans         # Verify ImageScan created
 ```
 
-5. Simulate scan completion:
+1. Simulate scan completion:
+
 ```bash
 kubectl patch imagescan <name> --type=merge -p '{"status":{"phase":"Passed"}}'
 kubectl get pod test           # Should now be Running
@@ -341,6 +363,7 @@ kubectl get pod test           # Should now be Running
 **Symptoms**: Pods show `SchedulingGated` in conditions
 
 **Debug**:
+
 ```bash
 kubectl get imagescans -A
 kubectl describe imagescan <name>
@@ -348,6 +371,7 @@ kubectl logs -n aqua-scan-gate-system deployment/aqua-scan-gate-controller
 ```
 
 **Common Causes**:
+
 - Aqua API unreachable
 - Scan still in progress
 - Critical vulnerabilities found
@@ -357,12 +381,14 @@ kubectl logs -n aqua-scan-gate-system deployment/aqua-scan-gate-controller
 **Symptoms**: New pods don't have scheduling gates
 
 **Debug**:
+
 ```bash
 kubectl get mutatingwebhookconfiguration aqua-scan-gate-webhook -o yaml
 kubectl logs -n aqua-scan-gate-system deployment/aqua-scan-gate-controller
 ```
 
 **Common Causes**:
+
 - Webhook service not ready
 - Certificate issues
 - Namespace excluded
@@ -372,11 +398,13 @@ kubectl logs -n aqua-scan-gate-system deployment/aqua-scan-gate-controller
 **Symptoms**: Controller pods restarting
 
 **Debug**:
+
 ```bash
 kubectl logs -n aqua-scan-gate-system deployment/aqua-scan-gate-controller --previous
 ```
 
 **Common Causes**:
+
 - Missing RBAC permissions
 - Aqua API credentials invalid
 - Go panic in reconcile loop
@@ -390,6 +418,7 @@ The controller exposes Prometheus metrics on `:8080/metrics`:
 - `controller_runtime_reconcile_time_seconds`: Reconciliation duration
 
 Health checks:
+
 - Liveness: `:8081/healthz`
 - Readiness: `:8081/readyz`
 
@@ -416,16 +445,19 @@ Potential improvements for consideration:
 ### Important Notes for Claude Agents
 
 1. **Always check if kubebuilder is installed** before attempting to scaffold:
+
    ```bash
    go install sigs.k8s.io/kubebuilder/v4@latest
    ```
 
 2. **Generated files**: After modifying CRD types, always run:
+
    ```bash
    make manifests generate
    ```
 
 3. **Testing changes**: Use the Makefile targets rather than direct commands:
+
    ```bash
    make test      # Run unit tests
    make build     # Build binary
@@ -436,7 +468,7 @@ Potential improvements for consideration:
 
 5. **Webhook markers**: The `// +kubebuilder:webhook` comments configure webhook registration. Verify these match your requirements.
 
-6. **Go module path**: The module is `github.com/richardmsong/aqua-scan-triggerer`. Ensure all imports use this path.
+6. **Go module path**: The module is `github.com/richardmsong/aqua-scan-gate`. Ensure all imports use this path.
 
 7. **Container image**: Update `config/samples/deployment.yaml` with your actual container registry before deploying.
 

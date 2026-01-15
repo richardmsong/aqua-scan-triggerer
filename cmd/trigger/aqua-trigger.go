@@ -26,9 +26,9 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/aqua"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/imageref"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	"github.com/richardmsong/aqua-scan-gate/pkg/aqua"
+	"github.com/richardmsong/aqua-scan-gate/pkg/imageref"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 // version information (set via ldflags during build)

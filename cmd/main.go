@@ -18,11 +18,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
-	"github.com/richardmsong/aqua-scan-triggerer/internal/controller"
-	webhookpkg "github.com/richardmsong/aqua-scan-triggerer/internal/webhook"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/aqua"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	securityv1alpha1 "github.com/richardmsong/aqua-scan-gate/api/v1alpha1"
+	"github.com/richardmsong/aqua-scan-gate/internal/controller"
+	webhookpkg "github.com/richardmsong/aqua-scan-gate/internal/webhook"
+	"github.com/richardmsong/aqua-scan-gate/pkg/aqua"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 var (

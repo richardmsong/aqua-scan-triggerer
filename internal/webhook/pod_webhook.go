@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 const (

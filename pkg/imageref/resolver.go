@@ -9,6 +9,12 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 // Resolver resolves image tags to digests by querying the registry.
@@ -36,42 +42,119 @@ func NewResolver(opts ...remote.Option) *Resolver {
 // For tag-based references, it queries the registry to get the digest.
 // For multi-arch images (index), it resolves to the linux/amd64 manifest digest.
 func (r *Resolver) ResolveDigest(ctx context.Context, imageRef string) (string, error) {
+	ctx, span := tracing.StartSpan(ctx, "imageref.ResolveDigest",
+		trace.WithAttributes(
+			tracing.AttrImageName.String(imageRef),
+			attribute.String("platform.os", r.Platform.OS),
+			attribute.String("platform.arch", r.Platform.Architecture),
+		))
+	defer span.End()
+
 	// Parse the image reference
 	ref, err := name.ParseReference(imageRef)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to parse image reference")
 		return "", fmt.Errorf("parsing image reference: %w", err)
 	}
 
+	// Extract registry for tracing
+	registry := ref.Context().RegistryStr()
+	span.SetAttributes(attribute.String("registry", registry))
+
 	// If it's already a digest reference, extract and return the digest
 	if digestRef, ok := ref.(name.Digest); ok {
-		return digestRef.DigestStr(), nil
+		digest := digestRef.DigestStr()
+		span.SetAttributes(
+			tracing.AttrImageDigest.String(digest),
+			attribute.Bool("already_resolved", true),
+		)
+		return digest, nil
 	}
 
 	// Add context to options
 	opts := append([]remote.Option{remote.WithContext(ctx)}, r.Options...)
 
 	// Try to get as an index (multi-arch image) first
-	idx, err := remote.Index(ref, opts...)
+	digest, err := r.fetchIndex(ctx, ref, opts)
 	if err == nil {
-		// It's a multi-arch image, find the linux/amd64 manifest
-		digest, err := r.resolveFromIndex(idx)
-		if err != nil {
-			return "", fmt.Errorf("resolving from index: %w", err)
-		}
+		span.SetAttributes(
+			tracing.AttrImageDigest.String(digest),
+			attribute.Bool("multi_arch", true),
+		)
 		return digest, nil
 	}
 
 	// Not an index, try as a single image
+	digest, err = r.fetchImage(ctx, ref, opts)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch image")
+		return "", err
+	}
+
+	span.SetAttributes(
+		tracing.AttrImageDigest.String(digest),
+		attribute.Bool("multi_arch", false),
+	)
+	return digest, nil
+}
+
+// fetchIndex attempts to fetch the image as a multi-arch index and resolve the platform-specific digest.
+func (r *Resolver) fetchIndex(ctx context.Context, ref name.Reference, opts []remote.Option) (string, error) {
+	ctx, span := tracing.StartSpan(ctx, "imageref.fetchIndex",
+		trace.WithAttributes(
+			semconv.HTTPRequestMethodGet,
+			attribute.String("registry", ref.Context().RegistryStr()),
+			attribute.String("repository", ref.Context().RepositoryStr()),
+		))
+	defer span.End()
+
+	idx, err := remote.Index(ref, opts...)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "not an index or fetch failed")
+		return "", err
+	}
+
+	span.SetAttributes(attribute.Bool("is_index", true))
+
+	digest, err := r.resolveFromIndex(idx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to resolve from index")
+		return "", fmt.Errorf("resolving from index: %w", err)
+	}
+
+	span.SetAttributes(tracing.AttrImageDigest.String(digest))
+	return digest, nil
+}
+
+// fetchImage fetches a single-arch image and returns its digest.
+func (r *Resolver) fetchImage(ctx context.Context, ref name.Reference, opts []remote.Option) (string, error) {
+	ctx, span := tracing.StartSpan(ctx, "imageref.fetchImage",
+		trace.WithAttributes(
+			semconv.HTTPRequestMethodGet,
+			attribute.String("registry", ref.Context().RegistryStr()),
+			attribute.String("repository", ref.Context().RepositoryStr()),
+		))
+	defer span.End()
+
 	img, err := remote.Image(ref, opts...)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to fetch image")
 		return "", fmt.Errorf("fetching image: %w", err)
 	}
 
 	digest, err := img.Digest()
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to get digest")
 		return "", fmt.Errorf("getting digest: %w", err)
 	}
 
+	span.SetAttributes(tracing.AttrImageDigest.String(digest.String()))
 	return digest.String(), nil
 }
 
@@ -98,16 +181,29 @@ func (r *Resolver) resolveFromIndex(idx v1.ImageIndex) (string, error) {
 // ResolveImageRef resolves an ImageRef, populating the Digest field if empty.
 // Returns a new ImageRef with the resolved digest.
 func (r *Resolver) ResolveImageRef(ctx context.Context, img ImageRef) (ImageRef, error) {
+	ctx, span := tracing.StartSpan(ctx, "imageref.ResolveImageRef",
+		trace.WithAttributes(
+			tracing.AttrImageName.String(img.Image),
+		))
+	defer span.End()
+
 	// If already has a digest, return as-is
 	if img.Digest != "" {
+		span.SetAttributes(
+			tracing.AttrImageDigest.String(img.Digest),
+			attribute.Bool("already_resolved", true),
+		)
 		return img, nil
 	}
 
 	digest, err := r.ResolveDigest(ctx, img.Image)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "failed to resolve digest")
 		return img, err
 	}
 
+	span.SetAttributes(tracing.AttrImageDigest.String(digest))
 	return ImageRef{
 		Image:  img.Image,
 		Digest: digest,

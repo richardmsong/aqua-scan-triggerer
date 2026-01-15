@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 // DefaultCacheTTL is the default time-to-live for cached registry data
@@ -117,7 +117,7 @@ type Config struct {
 	FileCacheEnabled *bool
 
 	// FileCacheDir is the directory for the cache file
-	// Default: /tmp/aqua-scan-triggerer
+	// Default: /tmp/aqua-scan-gate
 	FileCacheDir string
 }
 

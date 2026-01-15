@@ -12,9 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/aqua"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	securityv1alpha1 "github.com/richardmsong/aqua-scan-gate/api/v1alpha1"
+	"github.com/richardmsong/aqua-scan-gate/pkg/aqua"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

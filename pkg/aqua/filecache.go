@@ -11,7 +11,7 @@ import (
 
 const (
 	// DefaultCacheDir is the default directory for cache files
-	DefaultCacheDir = "/tmp/aqua-scan-triggerer"
+	DefaultCacheDir = "/tmp/aqua-scan-gate"
 	// DefaultCacheFile is the default filename for the registry cache
 	DefaultCacheFile = "registries.json"
 )
@@ -19,7 +19,7 @@ const (
 // FileCacheConfig holds configuration for the file-based cache
 type FileCacheConfig struct {
 	// CacheDir is the directory where cache files are stored
-	// Default: /tmp/aqua-scan-triggerer
+	// Default: /tmp/aqua-scan-gate
 	CacheDir string
 
 	// CacheFile is the filename for the cache file

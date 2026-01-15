@@ -1,4 +1,4 @@
-module github.com/richardmsong/aqua-scan-triggerer
+module github.com/richardmsong/aqua-scan-gate
 
 go 1.25.0
 

@@ -21,9 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/imageref"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/tracing"
+	securityv1alpha1 "github.com/richardmsong/aqua-scan-gate/api/v1alpha1"
+	"github.com/richardmsong/aqua-scan-gate/pkg/imageref"
+	"github.com/richardmsong/aqua-scan-gate/pkg/tracing"
 )
 
 const (

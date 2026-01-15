@@ -5,8 +5,8 @@
 domain: scans.aquasec.community
 layout:
 - go.kubebuilder.io/v4
-projectName: aqua-scan-triggerer
-repo: github.com/richardmsong/aqua-scan-triggerer
+projectName: aqua-scan-gate
+repo: github.com/richardmsong/aqua-scan-gate
 resources:
 - api:
     crdVersion: v1
@@ -15,7 +15,7 @@ resources:
   domain: scans.aquasec.community
   group: scans
   kind: ImageScan
-  path: github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1
+  path: github.com/richardmsong/aqua-scan-gate/api/v1alpha1
   version: v1alpha1
   webhooks:
     defaulting: true

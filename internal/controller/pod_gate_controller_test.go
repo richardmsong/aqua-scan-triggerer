@@ -13,8 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	securityv1alpha1 "github.com/richardmsong/aqua-scan-triggerer/api/v1alpha1"
-	"github.com/richardmsong/aqua-scan-triggerer/pkg/imageref"
+	securityv1alpha1 "github.com/richardmsong/aqua-scan-gate/api/v1alpha1"
+	"github.com/richardmsong/aqua-scan-gate/pkg/imageref"
 )
 
 var _ = Describe("PodGateReconciler", func() {

@@ -18,7 +18,7 @@ CONTAINER_TOOL ?= docker
 
 # Docker registry configuration
 REGISTRY ?= ghcr.io
-IMAGE_NAME ?= richardmsong/aqua-scan-triggerer
+IMAGE_NAME ?= richardmsong/aqua-scan-gate
 IMG ?= $(REGISTRY)/$(IMAGE_NAME):latest
 
 # DOCKER_TAGS can be set to override default tags (space-separated for multiple tags)
@@ -97,6 +97,10 @@ build: manifests generate fmt vet ## Build manager binary.
 .PHONY: build-trigger
 build-trigger: fmt vet ## Build aqua-trigger CLI binary.
 	go build -o bin/aqua-trigger cmd/trigger/aqua-trigger.go
+
+.PHONY: install-trigger
+install-trigger: fmt vet ## Install aqua-trigger CLI binary.
+	go install cmd/trigger/aqua-trigger.go
 
 .PHONY: build-all
 build-all: build build-trigger ## Build all binaries (manager and CLI).
